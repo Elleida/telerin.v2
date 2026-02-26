@@ -387,7 +387,8 @@ INSTRUCCIONES:
 Pregunta del usuario: {query}
 
 Ejecuta la búsqueda apropiada ahora."""
-    
+
+    print("📁 Creando agente de búsqueda...") 
     # Crear agente de búsqueda (usando el mismo backend LLM que el resto del flujo)
     search_agent = create_search_agent(llm_backend=llm_backend, llm_model=llm_model)
 
@@ -431,6 +432,19 @@ Ejecuta la búsqueda apropiada ahora."""
             if len(unique_tool_calls) < len(response.tool_calls):
                 response.tool_calls = unique_tool_calls
 
+            # Log de las queries que el agente va a ejecutar
+            for tc in unique_tool_calls:
+                tc_name = tc.get('name', '?')
+                tc_args = tc.get('args', {})
+                if tc_name == 'hybrid_search':
+                    tables = tc_args.get('table_names') or ['auto']
+                    print(f"   🗄️  [{tc_name}] query='{tc_args.get('query', '')}' | tablas={tables}")
+                elif tc_name == 'get_sql_query_results':
+                    sql = tc_args.get('sql_query', tc_args.get('query', ''))
+                    print(f"   🗄️  [{tc_name}] SQL={sql!r}")
+                else:
+                    print(f"   🗄️  [{tc_name}] args={tc_args}")
+
             tool_node = ToolNode(SEARCH_TOOLS)
             tool_messages = {"messages": agent_messages + [response]}
             try:
@@ -445,8 +459,11 @@ Ejecuta la búsqueda apropiada ahora."""
                     try:
                         result_data = json.loads(msg.content)
                         if result_data.get('success'):
-                            if result_data.get('results'):
-                                search_results.extend(result_data['results'])
+                            # check_schedule_coverage expone 'results' (formato estándar)
+                            # Otros tools exponen 'results' directamente
+                            tool_results_list = result_data.get('results', [])
+                            if tool_results_list:
+                                search_results.extend(tool_results_list)
                             if 'search_time' in result_data:
                                 search_time = result_data['search_time']
                             if 'db_search_time' in result_data:
@@ -465,6 +482,9 @@ Ejecuta la búsqueda apropiada ahora."""
             except Exception:
                 pass
             limit = get_sql_results_limit()
+
+            print("⚠️ El agente no generó tool_calls, usando hybrid_search como fallback...")
+            print(f"   🗄️  [hybrid_search] query='{actual_query}'")
             raw = hybrid_search.invoke({"query": actual_query, "limit": limit})
             try:
                 parsed = json.loads(raw) if isinstance(raw, str) else raw
@@ -486,6 +506,7 @@ Ejecuta la búsqueda apropiada ahora."""
             pass
         try:
             limit = get_sql_results_limit()
+            print(f"   🗄️  [hybrid_search fallback] query='{actual_query}'")
             raw = hybrid_search.invoke({"query": actual_query, "limit": limit})
             parsed = json.loads(raw) if isinstance(raw, str) else raw
             if isinstance(parsed, dict) and parsed.get('success'):

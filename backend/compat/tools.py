@@ -2183,7 +2183,7 @@ def _add_png_links_to_response(response_text: str, sources: List[Dict]) -> str:
         """
         Extrae el número de revista del magazine_id.
         Formato esperado: "TELE radio_1965-07-12_ejemplar_394_analysis.json"
-        Retorna: "revista#394"
+        Retorna: "Revista#394"
         """
         if not magazine_id:
             return ""
@@ -2191,7 +2191,7 @@ def _add_png_links_to_response(response_text: str, sources: List[Dict]) -> str:
         # Buscar patrón ejemplar_XXX y extraer el número
         match = re.search(r'ejemplar_(\d+)', magazine_id)
         if match:
-            return f"revista#{match.group(1)}"
+            return f"Revista#{match.group(1)}"
         
         # Si no tiene formato ejemplar, retornar el magazine_id tal cual
         return magazine_id
@@ -2243,7 +2243,7 @@ def _add_png_links_to_response(response_text: str, sources: List[Dict]) -> str:
                     if info.get("date"):
                         extra_info.append(info["date"])
                     
-                    extra_str = f" ({', '.join(extra_info)})" if extra_info else ""
+                    extra_str = f" {', '.join(extra_info)}" if extra_info else ""
                     
                     # Agregar enlace sin número de documento
                     if i > 0:
@@ -2285,7 +2285,7 @@ def _add_png_links_to_response(response_text: str, sources: List[Dict]) -> str:
             if info.get("date"):
                 extra_info.append(info["date"])
             
-            extra_str = f" ({', '.join(extra_info)})" if extra_info else ""
+            extra_str = f" {', '.join(extra_info)}" if extra_info else ""
             
             # Reemplazar "documento X" con "documento [enlace]"
             return f"{doc_word} [🗄️]({info['url']}){extra_str}"
@@ -2297,6 +2297,33 @@ def _add_png_links_to_response(response_text: str, sources: List[Dict]) -> str:
     except Exception as e:
         print(f"⚠️ Error en patrón singular: {e}")
     
+    # Eliminar cualquier referencia a ficheros *_analysis.json que el LLM haya podido incluir
+    cleaned = re.sub(r'\b[\w\-\.]+_analysis\.json\b', '', response_with_links)
+    # Limpiar dobles espacios o paréntesis vacíos que queden tras la limpieza
+    cleaned = re.sub(r'\(\s*,\s*', '(', cleaned)
+    cleaned = re.sub(r',\s*\)', ')', cleaned)
+    cleaned = re.sub(r'\(\s*\)', '', cleaned)
+    cleaned = re.sub(r'  +', ' ', cleaned)
+    if cleaned != response_with_links:
+        print(f"🧹 Referencias a _analysis.json eliminadas de la respuesta")
+    response_with_links = cleaned
+
+    # Eliminar residuos de "Ejemplar:," / "Ejemplar," (queda cuando se borra el _analysis.json del magazine_id)
+    # Cubre: "Ejemplar,", "Ejemplar:,", "Ejemplar: ,", "Ejemplar ," con o sin dos puntos
+    cleaned = re.sub(r'\bEjemplar\s*:?\s*,', '', response_with_links, flags=re.IGNORECASE)
+    # Por si quedó "Ejemplar:" o "Ejemplar" sin coma (valor completamente eliminado)
+    cleaned = re.sub(r'\bEjemplar\s*:?\s*(?=[,\)\s]|$)', '', cleaned, flags=re.IGNORECASE)
+    # Limpiar comas dobles o comas al inicio de paréntesis que puedan quedar
+    cleaned = re.sub(r'\(\s*,\s*', '(', cleaned)
+    cleaned = re.sub(r',\s*,', ',', cleaned)
+    cleaned = re.sub(r',\s*\)', ')', cleaned)
+    cleaned = re.sub(r'\(\s*\)', '', cleaned)
+    cleaned = re.sub(r'  +', ' ', cleaned)
+    if cleaned != response_with_links:
+        print(f"🧹 Residuos de 'Ejemplar:,' eliminados de la respuesta")
+    response_with_links = cleaned
+    
+
     print(f"📋 doc_to_info final: {len(doc_to_info)} fuentes con URL")
     if response_with_links != response_text:
         print(f"✅ Se agregaron enlaces PNG a la respuesta")
@@ -2400,7 +2427,7 @@ def generate_response_internal(
         except Exception as e:
             print(f"⚠️ Error aplicando reranking previo al filtrado: {e}")
     else:
-        print(f"   ℹ️ Reranking omitido: los resultados ya tienen relevance_score asignado")
+        print(f"   ℹ️ Reranking omitido: los resultados ya tienen rerank_score asignado")
 
     # Obtener umbral de score configurado (0.0 - 1.0)
     llm_threshold = get_llm_score_threshold()
@@ -2469,7 +2496,10 @@ def generate_response_internal(
         title = result.get("title", "N/A")
         date = result.get("date", None)  # Obtener fecha si existe
         entry_time = result.get("time", None)  # Obtener hora si existe
-        score = result.get("relevance_score", 0)
+        # Usar rerank_score (0-1) si está disponible, si no relevance_score (BM25)
+        rerank_score = result.get("rerank_score")
+        bm25_score = result.get("relevance_score", 0)
+        score = rerank_score if rerank_score is not None else bm25_score
         
         # Construir contenido con campos de texto
         text_fields = text_results[idx - 1] if idx - 1 < len(text_results) else {}
@@ -2525,8 +2555,11 @@ def generate_response_internal(
             "title": title
         }
         # Incluir valores de relevancia para que la UI pueda mostrarlos
-        source_info["score"] = score
+        source_info["score"] = score           # rerank (0-1) si disponible, BM25 si no
         source_info["relevance_score"] = score
+        source_info["bm25_score"] = bm25_score  # BM25 original siempre
+        if rerank_score is not None:
+            source_info["rerank_score"] = rerank_score
         if result.get("similarity") is not None:
             source_info["similarity"] = result.get("similarity")
         if result.get("png_url"):
@@ -2578,33 +2611,34 @@ DOCUMENTOS:
 
 PREGUNTA DEL USUARIO: {user_query}
 
-INSTRUCCIONES ADICIONALES:
-- Responde de forma clara y concisa
-- IMPORTANTE: SIEMPRE cita los documentos usando el formato exacto "documento N" (donde N es el número) cuando menciones información de ellos
-- Ejemplo correcto: "Según el documento 1, el programa..."
-- Ejemplo correcto: "En el documento 2 se menciona..."
-- NO uses formatos como "ejemplar_109", "página 15" o "la revista" sin indicar el número de documento
-- SIEMPRE incluye el número de documento al citar información
-- Cuando cites un documento, menciona explícitamente su Relevancia entre paréntesis (ej: "Documento 1 (Relevancia: 0.85)...")
-- Indica el ejemplar y página después de citar el documento si es relevante
-- Si la información en los documentos no es suficiente, indícalo
-- Mantén un tono profesional y útil
-- La respuesta debe estar EN ESPAÑOL
 
-- OBLIGATORIO: Identifica y nombra TODAS las apariciones de la consulta del usuario dentro de los documentos.
-    - Para cada documento citado, incluye las frases o fragmentos textuales donde aparece la consulta (o sus variantes relevantes), entrecomilladas.
-    - Indica el número de documento antes de cada fragmento citado. Si no hay apariciones, indícalo explícitamente.
+ESTRUCTURA OBLIGATORIA DE LA RESPUESTA (en este orden exacto, sin excepciones):
 
-- 📺 IMPORTANTE PARA PROGRAMACIÓN DE TV/RADIO:
-    - Si los documentos incluyen horarios (campo "Hora"), SIEMPRE presenta los programas ordenados cronológicamente en formato 24h (00:00 a 23:59)
-    - Si los documentos muestran horarios en formato 12h ("mañana/tarde", "a.m./p.m." o rangos 0:00-12:00), conviértelos SIEMPRE a 24h antes de ordenar y presentar
-    - Los programas deben listarse en orden de hora de inicio: primero 00:xx, luego 01:xx... hasta 23:xx
-    - Nunca pongas programas de madrugada (0:xx, 1:xx, 2:xx, etc.) al principio: van DESPUÉS de los programas de la noche (23:xx)
-    - El orden correcto es: 00:00-06:59 (madrugada) → 07:00-12:59 (mañana) → 13:00-18:59 (tarde) → 19:00-23:59 (noche) → 00:00... (siguiente día)
-    - Cuando listes múltiples programas, agrúpalos por bloques horarios o enuméralos manteniendo el orden chronológico
-    - Ejemplo válido: "13:30 - Programa A", "19:45 - Programa B", "23:15 - Programa C", "00:30 - Programa D (madrugada siguiente)"
+## 1. ESTRUCTURA ÚNICA: ## 
+La respuesta debe constar ÚNICAMENTE de una sola sección con la respuesta a la pregunta del usuario. No incluyas secciones de fragmentos, introducciones innecesarias ni conclusiones.
 
-RESPUESTA:"""
+## 2. REGLAS DE CONTENIDO Y CITAS
+- Responde de forma clara y profesional.
+- SIEMPRE cita la fuente inmediatamente después de cada dato usando el formato: (Documento N, Ejemplar, Página , Relevancia: 0.XX).
+- Si la información es insuficiente, indícalo honestamente sin inventar datos.
+- Siempre tiene que paparecer el número de documento citado (Documento N) para que el usuario pueda referenciarlo. No omitas el número de documento en las citas.
+
+## 3. REGLAS ESPECÍFICAS PARA PROGRAMACIÓN (TV/RADIO)
+Si la consulta es sobre una programación:
+- **Integración Total:** No te limites a listar el título. Debes incluir TODA la descripción, nombres de presentadores, capítulos, temas o sub-secciones que aparezcan en el documento para ese programa.
+- **Formato 24h:** Convierte cualquier horario (AM/PM, mañana/tarde) al formato 24h (ej: 21:30 en lugar de 9:30 tarde).
+- **Orden Cronológico:** Organiza la lista siempre por bloques, siguiendo el orden cronológico del día, respetando los siguientes bloques horarios: 
+  * Mañana (07:00-12:59)
+  * Tarde (13:00-18:59)
+  * Noche (19:00-23:59)
+  * Madrugada (00:00-06:59)
+- **Presentación:** Usa viñetas para cada programa: "**HH:MM - TÍTULO DEL PROGRAMA:** Descripción completa detallada (Documento N...)"
+
+## 4. IDIOMA
+La respuesta debe ser SIEMPRE en ESPAÑOL.
+
+RESPUESTA:
+"""
     
     # If allow_llm_without_docs is True, use a simplified prompt that DOES NOT
     # instruct the model to cite documents. This is used for system/help queries
@@ -3221,6 +3255,11 @@ RESPUESTA:"""
 
         # Post-process generated text
         print(f"✅ Respuesta generada ({len(generated_text)} caracteres)")
+        print("\n" + "━"*80)
+        print("🤖 RESPUESTA DEL LLM:")
+        print("━"*80)
+        print(generated_text)
+        print("━"*80 + "\n")
         generated_text_with_links = _add_png_links_to_response(generated_text, sources)
         if generated_text_with_links != generated_text:
             print(f"✅ Enlaces PNG agregados a la respuesta")
@@ -3316,12 +3355,18 @@ def check_schedule_coverage(year: int, month: int, day: int = 0) -> str:
 
         day_str = target.isoformat()
         sql = f"""
-            SELECT id, date, title, channel, time, day_of_week, content_description
+            SELECT id, magazine_id, page_number, date, title, channel, time, day_of_week, content_description
             FROM "{table}"
             WHERE date = '{day_str}'
             ORDER BY time, channel, title
             LIMIT 500
         """
+        # Columnas: r[0]=id, r[1]=magazine_id, r[2]=page_number, r[3]=date,
+        #           r[4]=title, r[5]=channel, r[6]=time, r[7]=day_of_week, r[8]=content_description
+        print(f"   🗄️  [check_schedule_coverage/día] SQL: '{sql}'")
+        # Registrar SQL ejecutada
+        clear_executed_sql_queries()
+        add_executed_sql_query(table, sql.strip())
         res = execute_cratedb_query(sql)
         if res is None:
             return json.dumps({"success": False, "error": "Error consultando CrateDB"})
@@ -3330,14 +3375,32 @@ def check_schedule_coverage(year: int, month: int, day: int = 0) -> str:
         day_names = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"]
         programas = [
             {
-                "titulo":      (r[2] or "").strip(),
-                "canal":       (r[3] or "").strip(),
-                "hora":        (r[4] or "").strip(),
-                "dia_semana":  (r[5] or "").strip(),
-                "descripcion": (r[6] or "").strip(),
+                "titulo":      (r[4] or "").strip(),
+                "canal":       (r[5] or "").strip(),
+                "hora":        (r[6] or "").strip(),
+                "dia_semana":  (r[7] or "").strip(),
+                "descripcion": (r[8] or "").strip(),
             }
             for r in rows
         ]
+        # Formatear como resultados estándar para que graph.py los pase al LLM
+        results = [
+            {
+                "magazine_id":          (r[1] or "N/A") if len(r) > 1 else "N/A",
+                "page_number":          r[2] if len(r) > 2 else None,
+                "title":                (r[4] or "").strip() if len(r) > 4 else "",
+                "channel":              (r[5] or "").strip() if len(r) > 5 else "",
+                "time":                 (r[6] or "").strip() if len(r) > 6 else "",
+                "day_of_week":          (r[7] or "").strip() if len(r) > 7 else "",
+                "content_description":  (r[8] or "").strip() if len(r) > 8 else "",
+                "date":                 day_str,
+                "relevance_score":      1.0,
+                "table_source":         "teleradio_content_tv_schedule",
+            }
+            for r in rows
+        ]
+        set_last_search_context(f"programación TV {day_str}", results)
+        print(f"   ✅ check_schedule_coverage/día: {len(results)} programas encontrados para {day_str}")
         return json.dumps({
             "success":        True,
             "modo":           "dia",
@@ -3346,6 +3409,7 @@ def check_schedule_coverage(year: int, month: int, day: int = 0) -> str:
             "hay_programacion": len(programas) > 0,
             "total_programas":  len(programas),
             "programas":        programas,
+            "results":          results,
         }, ensure_ascii=False)
 
     # ── Modo mes completo ─────────────────────────────────────────────────────
@@ -3358,6 +3422,7 @@ def check_schedule_coverage(year: int, month: int, day: int = 0) -> str:
         WHERE date LIKE '{prefix}%'
         ORDER BY date
     """
+    print(f"   🗄️  [check_schedule_coverage/mes] SQL: SELECT DISTINCT date FROM {table} WHERE date LIKE '{prefix}%'")
     res = execute_cratedb_query(sql)
     if res is None:
         return json.dumps({"success": False, "error": "Error consultando CrateDB"})

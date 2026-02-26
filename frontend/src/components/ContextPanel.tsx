@@ -82,17 +82,7 @@ export default function ContextPanel({ refreshTrigger = 0 }: ContextPanelProps) 
         </details>
       )}
 
-      {/* Entidades */}
-      {Object.keys(entities).length > 0 && (
-        <details>
-          <summary className="cursor-pointer text-xs font-medium text-gray-500 mb-1">
-            Entidades globales
-          </summary>
-          <pre className="text-xs bg-gray-100 rounded-lg p-2 overflow-x-auto">
-            {JSON.stringify(entities, null, 2)}
-          </pre>
-        </details>
-      )}
+      {/* Entidades — desactivadas (el historial completo se pasa al LLM) */}
 
       {/* Búsquedas recientes */}
       {ctx.recent_searches.length > 0 && (
