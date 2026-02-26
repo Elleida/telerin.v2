@@ -13,11 +13,8 @@ const BASE = typeof window !== 'undefined'
   ? BASE_PATH  // browser: prefijo /teleradio + Next.js proxy hace el rewrite
   : (process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000');
 
-// For endpoints that can take >30s (LLM calls), bypass the Next.js proxy
-// and call the backend directly using the same hostname but port 8000.
-const DIRECT_BASE = typeof window !== 'undefined'
-  ? `${window.location.protocol}//${window.location.hostname}:${process.env.NEXT_PUBLIC_API_URL ? new URL(process.env.NEXT_PUBLIC_API_URL).port || '8000' : '8000'}`
-  : (process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000');
+// DIRECT_BASE removed: all calls (including long LLM ones) go through the
+// Next.js rewrite proxy which has proxyTimeout:120_000 in next.config.js.
 
 async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
   const token = getToken();
@@ -149,7 +146,7 @@ export const apiImageSearch = async (
   fd.append('max_results', String(maxResults));
 
   const token = getToken();
-  const res = await fetch(`${DIRECT_BASE}/api/image/search`, {
+  const res = await fetch(`${BASE}/api/image/search`, {
     method: 'POST',
     headers: token ? { Authorization: `Bearer ${token}` } : {},
     body: fd,
@@ -162,7 +159,7 @@ export const apiImageDescribe = async (file: File): Promise<string> => {
   const fd = new FormData();
   fd.append('file', file);
   const token = getToken();
-  const res = await fetch(`${DIRECT_BASE}/api/image/describe`, {
+  const res = await fetch(`${BASE}/api/image/describe`, {
     method: 'POST',
     headers: token ? { Authorization: `Bearer ${token}` } : {},
     body: fd,
@@ -178,9 +175,9 @@ export const apiImageAnalyze = async (
   llm_backend: string,
   llm_model?: string,
 ): Promise<{ response: string; sources: unknown[]; error?: string }> => {
-  // Use DIRECT_BASE to bypass Next.js proxy timeout (LLM calls can take >30s)
+  // Routed through Next.js proxy (proxyTimeout:120_000 in next.config.js)
   const token = getToken();
-  const res = await fetch(`${DIRECT_BASE}/api/image/analyze`, {
+  const res = await fetch(`${BASE}/api/image/analyze`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
