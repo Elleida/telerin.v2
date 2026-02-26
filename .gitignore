@@ -1,0 +1,38 @@
+# Entornos Python
+venv/
+.venv/
+*.pyc
+__pycache__/
+*.pyo
+*.pyd
+*.egg-info/
+dist/
+build/
+
+# Variables de entorno (contienen claves privadas)
+backend/.env
+frontend/.env.local
+.env
+
+# Logs
+*.log
+queries_responses.log
+
+# Node / Next.js
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Datos y caché temporal
+*.db
+*.sqlite

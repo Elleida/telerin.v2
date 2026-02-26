@@ -1,0 +1,27 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-gray-50 text-gray-900;
+  }
+}
+
+/* Gradiente de marca igual que el CSS de app.py */
+.brand-gradient {
+  background: linear-gradient(to right, #FF6B35, #F7931E);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* Caja de respuesta */
+.response-box {
+  @apply bg-blue-50 p-4 rounded-lg border-l-4 border-brand-orange;
+}
+
+/* Scrollbar estilo fino */
+.thin-scrollbar::-webkit-scrollbar { width: 6px; }
+.thin-scrollbar::-webkit-scrollbar-track { @apply bg-transparent; }
+.thin-scrollbar::-webkit-scrollbar-thumb { @apply bg-gray-300 rounded-full; }
