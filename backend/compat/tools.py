@@ -1173,7 +1173,7 @@ def _rerank_results(query: str, results: List[Dict], limit: int) -> tuple:
             score = item['score']
             
             res = results[idx]
-            res['rerank_score'] = score  # preservamos relevance_score original (CrateDB) para el filtrado por umbral
+            res['rerank_score'] = score  # el filtrado de umbral usará este score de reranking
             new_results.append(res)
 
             if i < 10:
@@ -2432,11 +2432,16 @@ def generate_response_internal(
     # Obtener umbral de score configurado (0.0 - 1.0)
     llm_threshold = get_llm_score_threshold()
 
-    # Seleccionar únicamente los documentos cuyo score de reranking esté por encima del umbral
-    filtered_results = [r for r in search_results if r.get('relevance_score', 0) >= llm_threshold]
+    # Seleccionar únicamente los documentos cuyo score de reranking esté por encima del umbral.
+    # Se usa rerank_score si está disponible (valor real del reranker), o relevance_score como fallback.
+    def _effective_score(r: dict) -> float:
+        rs = r.get('rerank_score')
+        return rs if rs is not None else r.get('relevance_score', 0)
+
+    filtered_results = [r for r in search_results if _effective_score(r) >= llm_threshold]
 
     print(f"📊 Total resultados recibidos: {len(search_results)}")
-    print(f"📊 Umbral LLM: {llm_threshold:.2f} -> Documentos que cumplen: {len(filtered_results)}")
+    print(f"📊 Umbral LLM: {llm_threshold:.2f} -> Documentos que cumplen: {len(filtered_results)} (score: {'rerank_score' if any(r.get('rerank_score') is not None for r in search_results) else 'relevance_score'})")
 
     # Si no hay documentos por encima del umbral, decidir comportamiento según flag
     if not filtered_results and not allow_llm_without_docs:
@@ -2615,6 +2620,7 @@ PREGUNTA DEL USUARIO: {user_query}
 ESTRUCTURA OBLIGATORIA DE LA RESPUESTA (en este orden exacto, sin excepciones):
 
 ## 1. ESTRUCTURA ÚNICA: ## 
+## Respuesta: ##
 La respuesta debe constar ÚNICAMENTE de una sola sección con la respuesta a la pregunta del usuario. No incluyas secciones de fragmentos, introducciones innecesarias ni conclusiones.
 
 ## 2. REGLAS DE CONTENIDO Y CITAS
@@ -2628,10 +2634,16 @@ Si la consulta es sobre una programación:
 - **Integración Total:** No te limites a listar el título. Debes incluir TODA la descripción, nombres de presentadores, capítulos, temas o sub-secciones que aparezcan en el documento para ese programa.
 - **Formato 24h:** Convierte cualquier horario (AM/PM, mañana/tarde) al formato 24h (ej: 21:30 en lugar de 9:30 tarde).
 - **Orden Cronológico:** Organiza la lista siempre por bloques, siguiendo el orden cronológico del día, respetando los siguientes bloques horarios: 
-  * Mañana (07:00-12:59)
-  * Tarde (13:00-18:59)
-  * Noche (19:00-23:59)
-  * Madrugada (00:00-06:59)
+
+   ## Mañana (07:00-12:59) ##
+    programas de mañana
+   ## Tarde (13:00-18:59) ##
+    programas de tarde
+  ## Noche (19:00-23:59) ##
+    programas de noche
+  ## Madrugada (00:00-06:59) ##
+    programas de madrugada
+
 - **Presentación:** Usa viñetas para cada programa: "**HH:MM - TÍTULO DEL PROGRAMA:** Descripción completa detallada (Documento N...)"
 
 ## 4. IDIOMA
