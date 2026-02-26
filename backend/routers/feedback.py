@@ -36,6 +36,8 @@ class FeedbackRequest(BaseModel):
     response_time: float = Field(default=0.0)
     num_sources: int = Field(default=0)
     llm_model: str = Field(default="")
+    prompt_tokens: int = Field(default=0)
+    response_tokens: int = Field(default=0)
 
 
 class FeedbackResponse(BaseModel):
@@ -57,6 +59,8 @@ async def post_feedback(
         "comment": body.comment,
         "num_sources": body.num_sources,
         "llm_model": body.llm_model,
+        "prompt_tokens": body.prompt_tokens,
+        "response_tokens": body.response_tokens,
         "timings": {
             "db_search_s": round(body.db_search_time, 3),
             "reranking_s": round(body.reranking_time, 3),

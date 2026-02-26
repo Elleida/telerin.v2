@@ -31,6 +31,8 @@ export interface ChatFinalResult {
   db_search_time?: number;
   reranking_time?: number;
   response_time?: number;
+  prompt_tokens?: number;
+  response_tokens?: number;
   error?: string;
   success?: boolean;
 }

@@ -117,6 +117,8 @@ export const apiFeedback = (payload: {
   response_time?: number;
   num_sources?: number;
   llm_model?: string;
+  prompt_tokens?: number;
+  response_tokens?: number;
 }) =>
   apiFetch<{ ok: boolean }>('/api/feedback', {
     method: 'POST',

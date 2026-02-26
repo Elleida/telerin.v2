@@ -238,6 +238,8 @@ async def ws_chat(websocket: WebSocket):
                 "db_search_time":         result.get("db_search_time", 0),
                 "reranking_time":         result.get("reranking_time", 0),
                 "response_time":          result.get("response_time", 0),
+                "prompt_tokens":          result.get("prompt_tokens", 0),
+                "response_tokens":        result.get("response_tokens", 0),
                 "error":                  result.get("error"),
                 "success":                result.get("success", True),
             }
