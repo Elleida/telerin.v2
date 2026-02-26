@@ -96,11 +96,12 @@ def ensure_users_table() -> None:
         )
     """)
     # Migración: añadir columnas si la tabla ya existía sin ellas
+    # CrateDB no soporta IF NOT EXISTS en ALTER TABLE — el except descarta el error si ya existe
     for col in ("first_name TEXT", "last_name TEXT"):
         try:
-            _cratedb(f"ALTER TABLE telerin_users ADD COLUMN IF NOT EXISTS {col}")
+            _cratedb(f"ALTER TABLE telerin_users ADD COLUMN {col}")
         except Exception:
-            pass
+            pass  # columna ya existe o error ignorable
     # índice único sobre username
     try:
         _cratedb("CREATE INDEX IF NOT EXISTS idx_telerin_users_username ON telerin_users (username)")
