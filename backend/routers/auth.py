@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 
 from backend.config import JWT_EXPIRE_HOURS
 from backend.dependencies import get_current_admin, get_current_user
-from backend.models.schemas import LoginRequest, TokenResponse, UserCreate, UserPublic
+from backend.models.schemas import LoginRequest, TokenResponse, UserCreate, UserPublic, UserUpdate
 from backend.services.auth import (
     authenticate_user,
     create_access_token,
@@ -17,6 +17,7 @@ from backend.services.auth import (
     delete_user,
     ensure_users_table,
     list_users,
+    update_user,
     _truncate_password,
 )
 import traceback
@@ -76,6 +77,18 @@ async def remove_user(user_id: str, _: dict = Depends(get_current_admin)):
     ok = delete_user(user_id)
     if not ok:
         raise HTTPException(status_code=404, detail="Usuario no encontrado")
+
+
+@router.patch("/users/{user_id}", response_model=UserPublic)
+async def update_existing_user(user_id: str, body: UserUpdate, _: dict = Depends(get_current_admin)):
+    ok = update_user(user_id, body.username, body.email, body.role, body.password)
+    if not ok:
+        raise HTTPException(status_code=404, detail="Usuario no encontrado o error actualizando")
+    from backend.services.auth import get_user_by_id
+    user = get_user_by_id(user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="Usuario no encontrado")
+    return UserPublic(**{k: v for k, v in user.items() if k != "hashed_password"})
 
 
 # ── Bootstrap: crear primer admin ─────────────────────────────────────────

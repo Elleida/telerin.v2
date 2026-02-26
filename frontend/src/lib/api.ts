@@ -55,6 +55,39 @@ export const apiClearSession = () =>
 
 // ── Image ──────────────────────────────────────────────────────────────────
 
+// ── Admin / Users ───────────────────────────────────────────────────────────
+
+export interface UserPublic {
+  id: string;
+  username: string;
+  email?: string;
+  role: string;
+  created_at?: string;
+}
+
+export const apiGetUsers = () =>
+  apiFetch<UserPublic[]>('/api/auth/users');
+
+export const apiCreateUser = (data: { username: string; password: string; email?: string; role: string }) =>
+  apiFetch<UserPublic>('/api/auth/users', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  });
+
+export const apiUpdateUser = (id: string, data: { username?: string; email?: string; role?: string; password?: string }) =>
+  apiFetch<UserPublic>(`/api/auth/users/${id}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  });
+
+export const apiDeleteUser = (id: string) =>
+  fetch(`${BASE}/api/auth/users/${id}`, {
+    method: 'DELETE',
+    headers: { Authorization: `Bearer ${getToken()}` },
+  });
+
 // ── Feedback ──────────────────────────────────────────────────────────────
 
 export const apiFeedback = (payload: {

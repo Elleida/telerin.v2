@@ -27,6 +27,13 @@ class UserCreate(BaseModel):
     role: str = "user"  # "user" | "admin"
 
 
+class UserUpdate(BaseModel):
+    username: Optional[str] = None
+    email: Optional[str] = None
+    role: Optional[str] = None
+    password: Optional[str] = None  # si se envía, se cambia la contraseña
+
+
 class UserPublic(BaseModel):
     id: str
     username: str

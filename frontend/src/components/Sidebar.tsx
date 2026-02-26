@@ -1,6 +1,9 @@
 'use client';
 
+import { useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { ChatSettings, LlmBackend } from '@/lib/types';
+import { getUserRole } from '@/lib/auth';
 
 interface SidebarProps {
   settings: ChatSettings;
@@ -13,6 +16,9 @@ interface SidebarProps {
 export default function Sidebar({ settings, onChange, username, onLogout, onClearConv }: SidebarProps) {
   const update = <K extends keyof ChatSettings>(key: K, value: ChatSettings[K]) =>
     onChange({ ...settings, [key]: value });
+  const router = useRouter();
+  const [isAdmin, setIsAdmin] = useState(false);
+  useEffect(() => { setIsAdmin(getUserRole() === 'admin'); }, []);
 
   return (
     <aside className="w-72 shrink-0 bg-white border-r flex flex-col h-full overflow-y-auto thin-scrollbar">
@@ -29,6 +35,14 @@ export default function Sidebar({ settings, onChange, username, onLogout, onClea
               (salir)
             </button>
           </p>
+        )}
+        {isAdmin && (
+          <button
+            onClick={() => router.push('/admin')}
+            className="mt-2 w-full text-left text-xs text-purple-600 hover:text-purple-800 hover:underline"
+          >
+            🛠️ Panel de administración
+          </button>
         )}
       </div>
 

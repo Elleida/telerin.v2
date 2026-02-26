@@ -171,6 +171,31 @@ def list_users() -> list[dict]:
         return []
 
 
+def update_user(user_id: str, username: str | None, email: str | None, role: str | None, password: str | None) -> bool:
+    """Actualiza los campos no-None de un usuario."""
+    fields, args = [], []
+    if username is not None:
+        fields.append("username = ?")
+        args.append(username)
+    if email is not None:
+        fields.append("email = ?")
+        args.append(email)
+    if role is not None:
+        fields.append("role = ?")
+        args.append(role)
+    if password is not None:
+        fields.append("hashed_password = ?")
+        args.append(pwd_context.hash(_truncate_password(password)))
+    if not fields:
+        return True  # nada que actualizar
+    args.append(user_id)
+    try:
+        _cratedb(f"UPDATE telerin_users SET {', '.join(fields)} WHERE id = ?", args)
+        return True
+    except Exception:
+        return False
+
+
 def delete_user(user_id: str) -> bool:
     try:
         _cratedb("DELETE FROM telerin_users WHERE id = ?", [user_id])
