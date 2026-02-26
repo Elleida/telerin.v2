@@ -76,6 +76,10 @@ def call_llm_prompt(prompt: str, backend: str = "ollama", model: str | None = No
             raise Exception(f"Ollama error {resp.status_code}: {resp.text}")
         data = resp.json()
         if isinstance(data, dict):
+            _set_token_counts(
+                prompt_tokens=data.get("prompt_eval_count", 0),
+                response_tokens=data.get("eval_count", 0),
+            )
             return data.get("response") or data.get("text") or json.dumps(data)
         return str(data)
 
@@ -91,6 +95,12 @@ def call_llm_prompt(prompt: str, backend: str = "ollama", model: str | None = No
                 model=model_to_use,
                 contents=prompt,
             )
+            usage = getattr(response, "usage_metadata", None)
+            if usage:
+                _set_token_counts(
+                    prompt_tokens=getattr(usage, "prompt_token_count", 0) or 0,
+                    response_tokens=getattr(usage, "candidates_token_count", 0) or 0,
+                )
             return response.text or ""
         except Exception as e:
             raise Exception(f"Error llamando a Gemini: {e}")
@@ -99,6 +109,7 @@ def call_llm_prompt(prompt: str, backend: str = "ollama", model: str | None = No
 
 # Variable global para almacenar el último prompt generado
 LAST_GENERATED_PROMPT = None
+LAST_TOKEN_COUNTS: dict = {"prompt_tokens": 0, "response_tokens": 0}  # Conteo de tokens de la última llamada LLM
 LAST_USER_QUERY = None
 LAST_SEARCH_RESULTS = None
 LAST_EXECUTED_SQL_QUERIES = []  # Nueva variable para guardar todas las queries SQL ejecutadas
@@ -195,6 +206,17 @@ def set_last_prompt(prompt_text):
     """Guarda el último prompt generado"""
     global LAST_GENERATED_PROMPT
     LAST_GENERATED_PROMPT = prompt_text
+
+
+def get_last_token_counts() -> dict:
+    """Devuelve {prompt_tokens, response_tokens} de la última llamada LLM."""
+    return LAST_TOKEN_COUNTS.copy()
+
+
+def _set_token_counts(prompt_tokens: int, response_tokens: int):
+    """Actualiza el conteo de tokens de la última llamada LLM."""
+    global LAST_TOKEN_COUNTS
+    LAST_TOKEN_COUNTS = {"prompt_tokens": prompt_tokens, "response_tokens": response_tokens}
 
 
 def get_last_executed_sql_queries():
@@ -2456,6 +2478,8 @@ def generate_response_internal(
             "sources": [],
             "search_results": search_results,
             "prompt_used": prompt,
+            "prompt_tokens": get_last_token_counts()["prompt_tokens"],
+            "response_tokens": get_last_token_counts()["response_tokens"],
             "response_time": response_time,
             "reranker_model": reranker_model,
         }
@@ -2482,7 +2506,10 @@ def generate_response_internal(
         else:
             model_to_use = llm_model or os.getenv("OLLAMA_LLM_MODEL") or OLLAMA_LLM_MODEL
         try:
-            return call_llm_prompt(prompt, backend=backend, model=model_to_use)
+            result = call_llm_prompt(prompt, backend=backend, model=model_to_use)
+            tc = get_last_token_counts()
+            print(f"🔢 Tokens — prompt: {tc['prompt_tokens']:,}  respuesta: {tc['response_tokens']:,}  total: {tc['prompt_tokens'] + tc['response_tokens']:,}")
+            return result
         except Exception as e:
             print(f"⚠️ Error llamando al LLM ({backend}): {e}")
             raise
@@ -2874,6 +2901,8 @@ RESPUESTA:"""
                         "response": "No se pudo generar una respuesta en este momento.",
                         "search_results": original_results if 'original_results' in locals() else [],
                         "prompt_used": prompt,
+                        "prompt_tokens": get_last_token_counts()["prompt_tokens"],
+                        "response_tokens": get_last_token_counts()["response_tokens"],
                         "response_time": response_time,
                         "reranker_model": reranker_model,
                         "llm_backend": backend,
@@ -2922,6 +2951,8 @@ RESPUESTA:"""
                             "response": "No se pudo generar una respuesta en este momento.",
                             "search_results": original_results if 'original_results' in locals() else [],
                             "prompt_used": prompt,
+                            "prompt_tokens": get_last_token_counts()["prompt_tokens"],
+                            "response_tokens": get_last_token_counts()["response_tokens"],
                             "response_time": response_time,
                             "reranker_model": reranker_model,
                             "llm_backend": "ollama",
@@ -2988,6 +3019,8 @@ RESPUESTA:"""
                                     "response": "No se pudo generar una respuesta en este momento.",
                                     "search_results": original_results if 'original_results' in locals() else [],
                                     "prompt_used": prompt,
+                                    "prompt_tokens": get_last_token_counts()["prompt_tokens"],
+                                    "response_tokens": get_last_token_counts()["response_tokens"],
                                     "response_time": response_time,
                                     "reranker_model": reranker_model,
                                     "llm_backend": backend,
@@ -3014,6 +3047,8 @@ RESPUESTA:"""
                                     "response": "No se pudo generar una respuesta en este momento.",
                                     "search_results": original_results if 'original_results' in locals() else [],
                                     "prompt_used": prompt,
+                                    "prompt_tokens": get_last_token_counts()["prompt_tokens"],
+                                    "response_tokens": get_last_token_counts()["response_tokens"],
                                     "response_time": response_time,
                                     "reranker_model": reranker_model,
                                     "llm_backend": backend,
@@ -3028,6 +3063,8 @@ RESPUESTA:"""
                             "response": "No se pudo generar una respuesta en este momento.",
                             "search_results": original_results if 'original_results' in locals() else [],
                             "prompt_used": prompt,
+                            "prompt_tokens": get_last_token_counts()["prompt_tokens"],
+                            "response_tokens": get_last_token_counts()["response_tokens"],
                             "response_time": response_time,
                             "reranker_model": reranker_model,
                             "llm_backend": backend,
@@ -3204,6 +3241,8 @@ RESPUESTA:"""
                             "response": "No se pudo generar una respuesta en este momento.",
                             "search_results": original_results if 'original_results' in locals() else [],
                             "prompt_used": prompt,
+                            "prompt_tokens": get_last_token_counts()["prompt_tokens"],
+                            "response_tokens": get_last_token_counts()["response_tokens"],
                             "response_time": response_time,
                             "reranker_model": reranker_model,
                             "llm_backend": backend,
@@ -3235,6 +3274,8 @@ RESPUESTA:"""
                             "response": "No se pudo generar una respuesta en este momento.",
                             "search_results": original_results if 'original_results' in locals() else [],
                             "prompt_used": prompt,
+                            "prompt_tokens": get_last_token_counts()["prompt_tokens"],
+                            "response_tokens": get_last_token_counts()["response_tokens"],
                             "response_time": response_time,
                             "reranker_model": reranker_model,
                             "llm_backend": backend,
@@ -3260,6 +3301,8 @@ RESPUESTA:"""
                     "response": user_message,
                     "search_results": original_results if 'original_results' in locals() else [],
                     "prompt_used": prompt,
+                    "prompt_tokens": get_last_token_counts()["prompt_tokens"],
+                    "response_tokens": get_last_token_counts()["response_tokens"],
                     "response_time": response_time,
                     "reranker_model": reranker_model,
                     "llm_backend": backend,
@@ -3303,6 +3346,8 @@ RESPUESTA:"""
             "search_results": original_results,
             "num_sources": len(sources),
             "prompt_used": prompt,
+            "prompt_tokens": get_last_token_counts()["prompt_tokens"],
+            "response_tokens": get_last_token_counts()["response_tokens"],
             "response_time": response_time,
             "reranker_model": reranker_model,
             "llm_backend": backend,
@@ -3327,6 +3372,8 @@ RESPUESTA:"""
             "response": user_message,
             "search_results": original_results if 'original_results' in locals() else [],
             "prompt_used": prompt if 'prompt' in locals() else "",
+            "prompt_tokens": get_last_token_counts()["prompt_tokens"],
+            "response_tokens": get_last_token_counts()["response_tokens"],
             "response_time": response_time,
             "reranker_model": reranker_model,
             "llm_backend": (llm_backend or "ollama"),
