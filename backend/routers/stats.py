@@ -63,6 +63,7 @@ class RecentEntry(BaseModel):
     num_sources: int
     total_s: float
     llm_model: str = ""
+    comment: str = ""
 
 
 class StatsResponse(BaseModel):
@@ -155,6 +156,7 @@ async def get_stats(_: dict = Depends(get_current_admin)):
             num_sources=e.get("num_sources", 0),
             total_s=e.get("timings", {}).get("total_s", 0.0),
             llm_model=e.get("llm_model", ""),
+            comment=e.get("comment", ""),
         )
         for e in reversed(entries[-20:])
     ]

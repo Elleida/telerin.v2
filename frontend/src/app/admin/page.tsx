@@ -151,7 +151,7 @@ function StatsTab() {
         </div>
         <div className="divide-y divide-gray-700">
           {stats.recent.map((e, i) => (
-            <div key={i} className="px-5 py-3 hover:bg-gray-700/30">
+              <div key={i} className="px-5 py-3 hover:bg-gray-700/30">
               <div className="flex items-start justify-between gap-4">
                 <div className="flex-1 min-w-0">
                   <p className="text-sm text-gray-200 truncate">{e.query}</p>
@@ -160,6 +160,11 @@ function StatsTab() {
                     {' · '}{e.num_sources} fuentes · {fmt(e.total_s, 1)}s
                     {e.llm_model && <> · <span className="text-purple-400">{e.llm_model}</span></>}
                   </p>
+                  {e.rating === 'down' && e.comment && (
+                    <p className="mt-1.5 text-xs text-red-400 bg-red-950/40 border border-red-800/50 rounded-lg px-2 py-1">
+                      💬 {e.comment}
+                    </p>
+                  )}
                 </div>
                 <span className="text-lg shrink-0">{e.rating === 'up' ? '👍' : '👎'}</span>
               </div>
