@@ -40,6 +40,22 @@ from backend.compat.tools import (
     set_active_llm_backend,
 )
 from backend.compat.memory import ConversationMemory
+from backend.compat.context_extractor import ConversationContextExtractor
+
+_ENTITY_EXTRACTOR = ConversationContextExtractor()
+
+def _extract_entities(query: str, response: str, search_results: list) -> dict:
+    """Extrae entidades de la query, respuesta y resultados de búsqueda."""
+    try:
+        entities = _ENTITY_EXTRACTOR.extract_entities_from_text(query + " " + response[:500])
+        result_entities = _ENTITY_EXTRACTOR.extract_entities_from_results(search_results)
+        for key in entities:
+            entities[key] = set(entities.get(key, set())) | set(result_entities.get(key, set()))
+        # Convertir sets a listas para serializar
+        return {k: list(v) for k, v in entities.items()}
+    except Exception as e:
+        print(f"⚠️ Error extrayendo entidades: {e}")
+        return {}
 
 
 _MONTHS_ES = {
@@ -538,7 +554,7 @@ def response_node(state: GraphState) -> GraphState:
                     query_type="greeting",
                     enhanced_query=state.get("enhanced_query"),
                     search_results=[],
-                    entities_found={},
+                    entities_found=_extract_entities(user_query, greeting, []),
                     relevance_score=0.0,
                 )
             except Exception:
@@ -610,13 +626,18 @@ Evita respuestas largas; usa viñetas cuando sea posible y ofrece una última l�
         conversation_memory = state.get("conversation_memory")
         if conversation_memory is not None and CONVERSATION_MEMORY_CONFIG.get("entity_extraction", True):
             try:
+                _resp_text = gen.get("response") if isinstance(gen, dict) else str(gen)
+                _entities = _extract_entities(user_query, _resp_text, search_results)
+                if _entities:
+                    _entity_summary = ", ".join(f"{k}: {v}" for k, v in _entities.items() if v)
+                    print(f"🏷️ Entidades extraídas: {_entity_summary}")
                 conversation_memory.add_turn(
                     user_query=user_query,
-                    response=gen.get("response") if isinstance(gen, dict) else str(gen),
+                    response=_resp_text,
                     query_type="data_search",
                     enhanced_query=state.get("enhanced_query"),
                     search_results=search_results,
-                    entities_found={},
+                    entities_found=_entities,
                     relevance_score=1.0 if search_results else 0.5,
                 )
             except Exception:
