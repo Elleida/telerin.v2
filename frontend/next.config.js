@@ -1,5 +1,7 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  // Serve the app under /teleradio (same path as the previous Streamlit app)
+  basePath: '/teleradio',
   // Increase proxy timeout for long-running LLM calls (default is ~30s)
   experimental: {
     proxyTimeout: 120_000,
