@@ -2754,6 +2754,13 @@ RESPUESTA:"""
                                                 except Exception as e:
                                                     print(f"⚠️ STREAM HANDLER ERROR (genai.models): {e}")
                                                     pass
+                                    # Capturar tokens si el objeto iterator los expone tras consumirse
+                                    try:
+                                        _usage = getattr(stream_iter, 'usage_metadata', None)
+                                        if _usage:
+                                            _set_token_counts(getattr(_usage, 'prompt_token_count', 0) or 0, getattr(_usage, 'candidates_token_count', 0) or 0)
+                                    except Exception:
+                                        pass
                                 except Exception as e_stream:
                                     print(f"⚠️ genai.models.generate_content_stream failed: {e_stream}")
                                     # fall through to other streaming attempts
@@ -2847,6 +2854,9 @@ RESPUESTA:"""
                                 model=model_to_use,
                                 contents=[{"role": "user", "parts": [{"text": prompt}]}],
                             )
+                            _usage = getattr(response_obj, 'usage_metadata', None)
+                            if _usage:
+                                _set_token_counts(getattr(_usage, 'prompt_token_count', 0) or 0, getattr(_usage, 'candidates_token_count', 0) or 0)
                             generated_text = getattr(response_obj, 'text', None) or (response_obj.get('text') if isinstance(response_obj, dict) else None) or ""
                     else:
                         response_obj = client.models.generate_content(
@@ -2860,6 +2870,9 @@ RESPUESTA:"""
                                 }
                             ],
                         )
+                        _usage = getattr(response_obj, 'usage_metadata', None)
+                        if _usage:
+                            _set_token_counts(getattr(_usage, 'prompt_token_count', 0) or 0, getattr(_usage, 'candidates_token_count', 0) or 0)
 
                         # Extraer texto de la respuesta en varias posibles estructuras
                         generated_text = None
@@ -2938,7 +2951,9 @@ RESPUESTA:"""
                     )
 
                     if response.status_code == 200:
-                        generated_text = response.json().get("response", "")
+                        _rdata = response.json()
+                        generated_text = _rdata.get("response", "")
+                        _set_token_counts(_rdata.get("prompt_eval_count", 0) or 0, _rdata.get("eval_count", 0) or 0)
                         # Ajustar llm info para el retorno
                         backend = "ollama"
                         model_to_use = model_to_use_ollama
@@ -3165,6 +3180,8 @@ RESPUESTA:"""
                                         for obj_str in objs:
                                             try:
                                                 j = json.loads(obj_str)
+                                                if j.get('done'):
+                                                    _set_token_counts(j.get('prompt_eval_count', 0) or 0, j.get('eval_count', 0) or 0)
                                                 part = j.get('response') or j.get('text') or None
                                                 if part:
                                                     generated_text += str(part)
@@ -3207,6 +3224,8 @@ RESPUESTA:"""
                                             for obj_str in objs:
                                                 try:
                                                     j = json.loads(obj_str)
+                                                    if j.get('done'):
+                                                        _set_token_counts(j.get('prompt_eval_count', 0) or 0, j.get('eval_count', 0) or 0)
                                                     part = j.get('response') or j.get('text') or None
                                                     if part:
                                                         generated_text += str(part)
@@ -3264,7 +3283,9 @@ RESPUESTA:"""
                     )
 
                     if response.status_code == 200:
-                        generated_text = response.json().get("response", "")
+                        _rdata = response.json()
+                        generated_text = _rdata.get("response", "")
+                        _set_token_counts(_rdata.get("prompt_eval_count", 0) or 0, _rdata.get("eval_count", 0) or 0)
                     else:
                         print(f"❌ Error en respuesta: {response.status_code}")
                         response_time = time.time() - response_start_time
@@ -3311,6 +3332,8 @@ RESPUESTA:"""
 
         # Post-process generated text
         print(f"✅ Respuesta generada ({len(generated_text)} caracteres)")
+        _tc = get_last_token_counts()
+        print(f"🔢 Tokens — prompt: {_tc['prompt_tokens']:,}  respuesta: {_tc['response_tokens']:,}  total: {_tc['prompt_tokens'] + _tc['response_tokens']:,}")
         print("\n" + "━"*80)
         print("🤖 RESPUESTA DEL LLM:")
         print("━"*80)
