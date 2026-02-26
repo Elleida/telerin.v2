@@ -99,6 +99,8 @@ export interface StatsData {
   total: number; up: number; down: number;
   avg_db_search_s: number; avg_reranking_s: number; avg_response_s: number; avg_total_s: number;
   avg_num_sources: number;
+  avg_prompt_tokens: number;
+  avg_response_tokens: number;
   by_day: DayStat[]; by_user: UserStat[]; recent: RecentEntry[];
 }
 

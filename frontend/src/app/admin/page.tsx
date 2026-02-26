@@ -65,12 +65,14 @@ function StatsTab() {
     <div className="space-y-8">
 
       {/* Summary cards */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
         {[
-          { label: 'Consultas totales',  value: String(stats.total),                          color: 'text-white' },
-          { label: '👍 Positivas',       value: `${stats.up} (${pct(stats.up)}%)`,            color: 'text-green-400' },
-          { label: '👎 Negativas',       value: `${stats.down} (${pct(stats.down)}%)`,        color: 'text-red-400' },
-          { label: 'Fuentes promedio',   value: fmt(stats.avg_num_sources) + ' / consulta',   color: 'text-blue-400' },
+          { label: 'Consultas totales',    value: String(stats.total),                          color: 'text-white' },
+          { label: '👍 Positivas',         value: `${stats.up} (${pct(stats.up)}%)`,            color: 'text-green-400' },
+          { label: '👎 Negativas',         value: `${stats.down} (${pct(stats.down)}%)`,        color: 'text-red-400' },
+          { label: 'Fuentes promedio',     value: fmt(stats.avg_num_sources) + ' / consulta',   color: 'text-blue-400' },
+          { label: 'Tokens prompt (avg)',  value: Math.round(stats.avg_prompt_tokens).toLocaleString('es-ES'), color: 'text-purple-400' },
+          { label: 'Tokens respuesta (avg)', value: Math.round(stats.avg_response_tokens).toLocaleString('es-ES'), color: 'text-purple-300' },
         ].map(c => (
           <div key={c.label} className="bg-gray-800 border border-gray-700 rounded-xl p-4">
             <p className="text-xs text-gray-400 mb-1">{c.label}</p>

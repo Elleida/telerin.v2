@@ -74,6 +74,8 @@ class StatsResponse(BaseModel):
     avg_response_s: float
     avg_total_s: float
     avg_num_sources: float
+    avg_prompt_tokens: float
+    avg_response_tokens: float
     by_day: list[DayStat]
     by_user: list[UserStat]
     recent: list[RecentEntry]
@@ -91,11 +93,13 @@ async def get_stats(_: dict = Depends(get_current_admin)):
     def avg(vals):
         return round(sum(vals) / len(vals), 3) if vals else 0.0
 
-    db_times   = [e["timings"]["db_search_s"]  for e in entries if "timings" in e]
-    rer_times  = [e["timings"]["reranking_s"]  for e in entries if "timings" in e]
-    resp_times = [e["timings"]["response_s"]   for e in entries if "timings" in e]
-    tot_times  = [e["timings"]["total_s"]      for e in entries if "timings" in e]
-    sources    = [e.get("num_sources", 0)      for e in entries]
+    db_times      = [e["timings"]["db_search_s"]  for e in entries if "timings" in e]
+    rer_times     = [e["timings"]["reranking_s"]  for e in entries if "timings" in e]
+    resp_times    = [e["timings"]["response_s"]   for e in entries if "timings" in e]
+    tot_times     = [e["timings"]["total_s"]      for e in entries if "timings" in e]
+    sources       = [e.get("num_sources", 0)      for e in entries]
+    prompt_tokens = [e["prompt_tokens"]   for e in entries if e.get("prompt_tokens")]
+    resp_tokens   = [e["response_tokens"] for e in entries if e.get("response_tokens")]
 
     # By day (last 30 days)
     day_counts: dict[str, dict] = defaultdict(lambda: {"count": 0, "up": 0, "down": 0})
@@ -164,6 +168,8 @@ async def get_stats(_: dict = Depends(get_current_admin)):
         avg_response_s=avg(resp_times),
         avg_total_s=avg(tot_times),
         avg_num_sources=avg(sources),
+        avg_prompt_tokens=avg(prompt_tokens),
+        avg_response_tokens=avg(resp_tokens),
         by_day=by_day,
         by_user=by_user,
         recent=recent,
