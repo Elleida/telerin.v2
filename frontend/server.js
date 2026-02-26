@@ -19,27 +19,30 @@ app.prepare().then(() => {
     handle(req, res, parsedUrl);
   });
 
-  // Intercept ALL WebSocket upgrade requests.
-  // Streamlit clients try to open ws://.../stream after health checks.
-  // Next.js cannot handle these and throws an unhandled error — so we
-  // destroy the socket here before Next.js sees it.
-  server.on('upgrade', (req, socket) => {
-    const url = req.url || '';
-    if (url.startsWith('/_stcore') || url.startsWith('/teleradio/_stcore')) {
-      // Close cleanly — this stops Streamlit from retrying indefinitely
-      socket.write(
-        'HTTP/1.1 400 Bad Request\r\n' +
-        'Content-Length: 0\r\n' +
-        'Connection: close\r\n\r\n'
-      );
-      socket.destroy();
-      return;
-    }
-    // Let any other upgrades through (e.g. Next.js HMR in dev)
-    // Nothing to do — Next.js registers its own 'upgrade' handler
-  });
-
   server.listen(port, '0.0.0.0', () => {
+    // Capture whatever upgrade listeners Next.js has registered (HMR etc.)
+    // Replace them all with a single handler that filters _stcore first.
+    const existingListeners = [...server.listeners('upgrade')];
+    server.removeAllListeners('upgrade');
+
+    server.on('upgrade', (req, socket, head) => {
+      const url = req.url || '';
+      if (url.startsWith('/_stcore') || url.startsWith('/teleradio/_stcore')) {
+        // Close cleanly — stops Streamlit from retrying, avoids Next.js crash
+        socket.write(
+          'HTTP/1.1 400 Bad Request\r\n' +
+          'Content-Length: 0\r\n' +
+          'Connection: close\r\n\r\n'
+        );
+        socket.destroy();
+        return;
+      }
+      // Forward to Next.js's own upgrade handlers (HMR websocket in dev)
+      for (const fn of existingListeners) {
+        fn.call(server, req, socket, head);
+      }
+    });
+
     console.log(`> Ready on http://0.0.0.0:${port}`);
   });
 });
