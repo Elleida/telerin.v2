@@ -4,7 +4,9 @@ Configuración del backend FastAPI — TeleRadio Multi-Agent Team (telerin.v2)
 import os
 from dotenv import load_dotenv
 
-load_dotenv()
+# Siempre cargar el .env desde la raíz del proyecto (un nivel arriba de backend/)
+_here = os.path.dirname(os.path.abspath(__file__))
+load_dotenv(os.path.join(_here, "..", ".env"))
 
 # ── CrateDB ────────────────────────────────────────────────────────────────
 CRATEDB_URL      = os.getenv("CRATEDB_URL", "http://localhost:4200/_sql")
