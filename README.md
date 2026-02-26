@@ -1,6 +1,6 @@
 # TELERÍN v2 — Asistente de TeleRadio con Agentes LLM
 
-Chatbot multi-agente para consulta del archivo histórico de la revista **TeleRadio** (RTVE, 1957–1991). Permite buscar programación de TV y radio, publicidad, artículos editoriales e imágenes mediante lenguaje natural, con memoria conversacional y soporte para múltiples backends LLM.
+Chatbot multi-agente para consulta del archivo histórico de la revista **TeleRadio** (RTVE, 1958–1965). Permite buscar programación de TV y radio, publicidad, artículos editoriales e imágenes mediante lenguaje natural, con memoria conversacional y soporte para múltiples backends LLM.
 
 ---
 
@@ -231,17 +231,6 @@ telerin.v2/
 ## Licencia
 
 Proyecto interno RTVE / Universidad de Zaragoza — PoC 70 años TVE.
-
-
----
-
-## Características principales
-
-- **Búsqueda híbrida** BM25 + semántica vectorial sobre CrateDB
-- **Reranking** mediante VIVOClient (servicio externo)
-- **Memoria contextual** con detección de follow-up y mejora de query en una sola llamada LLM
-- **Múltiples backends LLM**: Ollama (local/remoto) y Google Gemini
-- **Streaming** de respuestas vía WebSocket
 - **Búsqueda de imágenes** con embeddings CLIP y descripción multimodal
 - **Autenticación JWT** con gestión de usuarios
 - **Frontend Next.js 14** con panel de contexto, debug y lightbox de imágenes
