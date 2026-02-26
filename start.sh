@@ -61,14 +61,14 @@ start_frontend() {
   cd "$FRONTEND_DIR"
   npm install --silent
 
-  # Liberar puerto 3000 si está ocupado
-  if lsof -ti:3000 &>/dev/null; then
-    echo -e "${ORANGE}[Frontend] Puerto 3000 ocupado, liberando...${NC}"
-    kill -9 $(lsof -ti:3000) 2>/dev/null || true
+  # Liberar puerto 8502 si está ocupado
+  if lsof -ti:8502 &>/dev/null; then
+    echo -e "${ORANGE}[Frontend] Puerto 8502 ocupado, liberando...${NC}"
+    kill -9 $(lsof -ti:8502) 2>/dev/null || true
     sleep 1
   fi
 
-  echo -e "${GREEN}[Frontend] Arrancando Next.js en :3000 ...${NC}"
+  echo -e "${GREEN}[Frontend] Arrancando Next.js en :8502 ...${NC}"
   npm run dev &
   FRONTEND_PID=$!
   echo "   PID frontend: $FRONTEND_PID"
@@ -96,7 +96,7 @@ esac
 echo ""
 echo -e "${GREEN}✅ Sistema arrancado:${NC}"
 echo "   Backend  → http://localhost:8000"
-echo "   Frontend → http://localhost:3000"
+echo "   Frontend → http://localhost:8502"
 echo "   API docs → http://localhost:8000/docs"
 echo ""
 echo "Pulsa Ctrl+C para parar todo."
