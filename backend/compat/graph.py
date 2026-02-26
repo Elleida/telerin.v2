@@ -119,6 +119,8 @@ class GraphState(TypedDict):
     db_search_time: float
     reranking_time: float
     response_time: float
+    prompt_tokens: int
+    response_tokens: int
     search_classification: Optional[str]
     conversation_memory: Optional[ConversationMemory]
     enhanced_query: Optional[str]
@@ -672,11 +674,13 @@ Evita respuestas largas; usa viñetas cuando sea posible y ofrece una última l�
         sources = gen.get('sources', []) if isinstance(gen, dict) else []
         prompt_used = gen.get('prompt_used', '') if isinstance(gen, dict) else ''
         response_time = gen.get('response_time', 0) if isinstance(gen, dict) else 0
+        prompt_tokens = gen.get('prompt_tokens', 0) if isinstance(gen, dict) else 0
+        response_tokens = gen.get('response_tokens', 0) if isinstance(gen, dict) else 0
         
         # 🆕 DEBUG: Verificar tiempos de búsqueda
         db_search_time = state.get('db_search_time', 0)
         reranking_time = state.get('reranking_time', 0)
-        print(f"🔍 DEBUG RESPUESTA_NODE: db_search_time={db_search_time:.2f}s, reranking_time={reranking_time:.2f}s, response_time={response_time:.2f}s")
+        print(f"🔍 DEBUG RESPUESTA_NODE: db_search_time={db_search_time:.2f}s, reranking_time={reranking_time:.2f}s, response_time={response_time:.2f}s, tokens={prompt_tokens}+{response_tokens}")
         
         return {
             **state,
@@ -684,6 +688,8 @@ Evita respuestas largas; usa viñetas cuando sea posible y ofrece una última l�
             "sources": sources,
             "prompt_used": prompt_used,
             "response_time": response_time,
+            "prompt_tokens": prompt_tokens,
+            "response_tokens": response_tokens,
             "error": "" if gen.get('success', True) else gen.get('error', ''),
             "sql_queries": state.get('sql_queries', []),
             "db_search_time": db_search_time,
@@ -738,6 +744,8 @@ def run_graph(
         "db_search_time": 0.0,
         "reranking_time": 0.0,
         "response_time": 0.0,
+        "prompt_tokens": 0,
+        "response_tokens": 0,
         "sql_queries": [],
         "enhanced_query": None,
         "conversation_context": None,
@@ -761,6 +769,8 @@ def run_graph(
             "db_search_time": final_state.get("db_search_time", 0),
             "reranking_time": final_state.get("reranking_time", 0),
             "response_time": final_state.get("response_time", 0),
+            "prompt_tokens": final_state.get("prompt_tokens", 0),
+            "response_tokens": final_state.get("response_tokens", 0),
             "enhanced_query": final_state.get("enhanced_query"),
             "is_contextual_follow_up": final_state.get("is_contextual_follow_up", False),
             "conversation_context": final_state.get("conversation_context"),
