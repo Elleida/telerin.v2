@@ -115,6 +115,9 @@ export default function ChatPanel({
         query,
         response: msg.content,
         rating,
+        db_search_time: msg.result?.db_search_time ?? 0,
+        reranking_time: msg.result?.reranking_time ?? 0,
+        response_time: msg.result?.response_time ?? 0,
       });
     } catch {
       // silencioso — el log de backend ya captura errores

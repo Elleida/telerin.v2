@@ -63,6 +63,9 @@ export const apiFeedback = (payload: {
   response: string;
   rating: 'up' | 'down';
   comment?: string;
+  db_search_time?: number;
+  reranking_time?: number;
+  response_time?: number;
 }) =>
   apiFetch<{ ok: boolean }>('/api/feedback', {
     method: 'POST',

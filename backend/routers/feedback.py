@@ -29,6 +29,9 @@ class FeedbackRequest(BaseModel):
     response: str
     rating: str = Field(pattern="^(up|down)$")
     comment: str = Field(default="")
+    db_search_time: float = Field(default=0.0)
+    reranking_time: float = Field(default=0.0)
+    response_time: float = Field(default=0.0)
 
 
 class FeedbackResponse(BaseModel):
@@ -48,6 +51,12 @@ async def post_feedback(
         "query": body.query,
         "response": body.response[:_MAX_RESPONSE_CHARS],
         "comment": body.comment,
+        "timings": {
+            "db_search_s": round(body.db_search_time, 3),
+            "reranking_s": round(body.reranking_time, 3),
+            "response_s": round(body.response_time, 3),
+            "total_s": round(body.db_search_time + body.reranking_time + body.response_time, 3),
+        },
     }
 
     try:
