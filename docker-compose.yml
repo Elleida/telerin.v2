@@ -10,11 +10,12 @@ services:
     volumes:
       - ../telerin.v1.3:/agent:ro   # acceso de sólo lectura al agente original
       - ./backend:/app
+      - ./logs:/app/logs
     env_file:
       - ./backend/.env
     environment:
       - AGENT_DIR=/agent
-      - FEEDBACK_LOG_PATH=/app/feedback.log
+      - FEEDBACK_LOG_PATH=/app/logs/feedback.log
     depends_on: []
 
   frontend:

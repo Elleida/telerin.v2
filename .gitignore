@@ -39,3 +39,4 @@ Thumbs.db
 
 # Feedback log
 backend/feedback.log
+logs/feedback.log

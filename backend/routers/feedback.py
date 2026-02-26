@@ -17,7 +17,9 @@ from backend.dependencies import get_current_user
 router = APIRouter(prefix="/api/feedback", tags=["feedback"])
 
 # Ruta del fichero de log — configurable vía variable de entorno
-_LOG_PATH = Path(os.getenv("FEEDBACK_LOG_PATH", "/app/feedback.log"))
+# Fallback a /tmp/feedback.log si el path principal no es escribible
+_LOG_PATH = Path(os.getenv("FEEDBACK_LOG_PATH", "/app/logs/feedback.log"))
+_FALLBACK_LOG_PATH = Path("/tmp/feedback.log")
 
 # Máx. caracteres de respuesta a guardar en el log
 _MAX_RESPONSE_CHARS = 1000
@@ -59,13 +61,20 @@ async def post_feedback(
         },
     }
 
-    try:
-        _LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
-        with _LOG_PATH.open("a", encoding="utf-8") as f:
-            f.write(json.dumps(entry, ensure_ascii=False) + "\n")
-        print(f"📝 Feedback {'👍' if body.rating == 'up' else '👎'} guardado: \"{body.query[:60]}\"")
-    except Exception as exc:
-        print(f"⚠️ Error guardando feedback: {exc}")
+    line = json.dumps(entry, ensure_ascii=False) + "\n"
+    saved = False
+    for path in [_LOG_PATH, _FALLBACK_LOG_PATH]:
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            with path.open("a", encoding="utf-8") as f:
+                f.write(line)
+            print(f"📝 Feedback {'👍' if body.rating == 'up' else '👎'} guardado en {path}: \"{body.query[:60]}\"")
+            saved = True
+            break
+        except Exception as exc:
+            print(f"⚠️ No se pudo escribir en {path}: {exc}")
+
+    if not saved:
         return FeedbackResponse(ok=False)
 
     return FeedbackResponse(ok=True)
