@@ -9,11 +9,11 @@ const nextConfig = {
   async rewrites() {
     return [
       {
-        // basePath: false → don't auto-prepend '/teleradio' to source,
-        // so fetch('/api/...') from the browser still matches this rule
-        // (otherwise Next.js would require '/teleradio/api/...')
+        // Next.js auto-prepends basePath ('/teleradio') to this source,
+        // so it matches '/teleradio/api/:path*'.
+        // The frontend BASE in api.ts includes NEXT_PUBLIC_BASE_PATH so
+        // fetch('/teleradio/api/...') is used — works both direct and via nginx.
         source: '/api/:path*',
-        basePath: false,
         destination: `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}/api/:path*`,
       },
     ];

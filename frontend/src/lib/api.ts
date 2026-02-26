@@ -4,9 +4,13 @@ import { getToken } from './auth';
 import { SessionContext, ImageSearchResult } from './types';
 
 // Use relative URLs so requests go through Next.js rewrites (/api/* → backend).
+// In the browser we prefix with basePath ('/teleradio') so the fetch path
+// '/teleradio/api/...' matches the Next.js rewrite rule (which auto-prepends
+// basePath to the source '/api/:path*'). Works both direct and via nginx proxy.
 // NEXT_PUBLIC_API_URL is only needed for SSR or direct backend access.
+const BASE_PATH = process.env.NEXT_PUBLIC_BASE_PATH ?? '';
 const BASE = typeof window !== 'undefined'
-  ? ''   // browser: rutas relativas, Next.js proxy hace el rewrite
+  ? BASE_PATH  // browser: prefijo /teleradio + Next.js proxy hace el rewrite
   : (process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000');
 
 // For endpoints that can take >30s (LLM calls), bypass the Next.js proxy
