@@ -13,7 +13,9 @@ THIS_DIR = os.path.abspath(os.path.dirname(__file__))
 REPO_ROOT = os.path.abspath(os.path.join(THIS_DIR, ".."))
 BACKEND_DIR = os.path.join(REPO_ROOT, "backend")
 
-# Asegurar que el paquete `services` del backend sea importable
+# Asegurar que la raíz y el paquete `backend` sean importables
+if REPO_ROOT not in sys.path:
+    sys.path.insert(0, REPO_ROOT)
 if BACKEND_DIR not in sys.path:
     sys.path.insert(0, BACKEND_DIR)
 

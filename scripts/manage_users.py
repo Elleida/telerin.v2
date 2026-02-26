@@ -18,8 +18,10 @@ import argparse
 import sys
 import os
 
-# Añadir backend al path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "backend"))
+# Añadir raíz del proyecto y backend al path
+_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+sys.path.insert(0, _root)
+sys.path.insert(0, os.path.join(_root, "backend"))
 
 from services.auth import (
     create_user,
