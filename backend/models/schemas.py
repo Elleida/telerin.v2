@@ -3,8 +3,9 @@ Schemas Pydantic compartidos por los routers del backend.
 """
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
-from pydantic import BaseModel, Field
+from typing import Any, Dict, List, Optional, Union
+from datetime import datetime, timezone
+from pydantic import BaseModel, Field, field_validator
 
 
 # ── Auth ───────────────────────────────────────────────────────────────────
@@ -39,7 +40,15 @@ class UserPublic(BaseModel):
     username: str
     email: Optional[str] = None
     role: str
-    created_at: Optional[str] = None
+    created_at: Optional[Union[str, int]] = None
+
+    @field_validator('created_at', mode='before')
+    @classmethod
+    def coerce_created_at(cls, v):
+        """CrateDB stores TIMESTAMP as milliseconds since epoch (int)."""
+        if isinstance(v, (int, float)):
+            return datetime.fromtimestamp(v / 1000, tz=timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
+        return v
 
 
 # ── Chat ───────────────────────────────────────────────────────────────────
