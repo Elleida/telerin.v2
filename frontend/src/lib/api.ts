@@ -66,6 +66,7 @@ export const apiFeedback = (payload: {
   db_search_time?: number;
   reranking_time?: number;
   response_time?: number;
+  num_sources?: number;
 }) =>
   apiFetch<{ ok: boolean }>('/api/feedback', {
     method: 'POST',
