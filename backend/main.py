@@ -12,7 +12,7 @@ from fastapi.staticfiles import StaticFiles
 
 from backend.config import CORS_ORIGINS
 from backend.services.auth import ensure_users_table
-from backend.routers import auth, chat, feedback, image, session, stats
+from backend.routers import auth, chat, feedback, image, session, stats, models
 
 app = FastAPI(
     title="TeleRadio Multi-Agent API",
@@ -36,6 +36,7 @@ app.include_router(feedback.router)
 app.include_router(image.router)
 app.include_router(session.router)
 app.include_router(stats.router)
+app.include_router(models.router)
 
 # ── Imágenes estáticas ─────────────────────────────────────────────────────
 _PNG_DIR = os.getenv("PNG_BASE_DIR", "").strip()

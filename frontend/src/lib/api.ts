@@ -104,6 +104,10 @@ export interface StatsData {
 
 export const apiGetStats = () => apiFetch<StatsData>('/api/stats');
 
+// ── Models ──────────────────────────────────────────────────────────────────────────────
+export interface ModelInfo { name: string; size: number; }
+export const apiGetModels = () => apiFetch<{ ollama: ModelInfo[] }>('/api/models');
+
 // ── Feedback ──────────────────────────────────────────────────────────────
 
 export const apiFeedback = (payload: {

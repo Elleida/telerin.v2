@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { ChatSettings, LlmBackend } from '@/lib/types';
 import { getUserRole } from '@/lib/auth';
+import { apiGetModels, ModelInfo } from '@/lib/api';
 
 interface SidebarProps {
   settings: ChatSettings;
@@ -18,7 +19,24 @@ export default function Sidebar({ settings, onChange, username, onLogout, onClea
     onChange({ ...settings, [key]: value });
   const router = useRouter();
   const [isAdmin, setIsAdmin] = useState(false);
+  const [ollamaModels, setOllamaModels] = useState<ModelInfo[]>([]);
+
   useEffect(() => { setIsAdmin(getUserRole() === 'admin'); }, []);
+
+  // Cargar modelos Ollama disponibles al montar / cuando cambia a ollama
+  useEffect(() => {
+    if (settings.llm_backend !== 'ollama') return;
+    apiGetModels()
+      .then((data) => {
+        setOllamaModels(data.ollama ?? []);
+        // Si el modelo actual no está en la lista, seleccionar el primero
+        if (data.ollama?.length && !data.ollama.find((m) => m.name === settings.llm_model)) {
+          onChange({ ...settings, llm_model: data.ollama[0].name });
+        }
+      })
+      .catch(() => setOllamaModels([]));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [settings.llm_backend]);
 
   return (
     <aside className="w-72 shrink-0 bg-white border-r flex flex-col h-full overflow-y-auto thin-scrollbar">
@@ -95,7 +113,7 @@ export default function Sidebar({ settings, onChange, username, onLogout, onClea
                 onClick={() => {
                   const defaultModel = b === 'gemini'
                     ? (process.env.NEXT_PUBLIC_DEFAULT_GEMINI_MODEL ?? 'gemini-3-flash-preview')
-                    : (process.env.NEXT_PUBLIC_DEFAULT_LLM_MODEL ?? '');
+                    : (ollamaModels[0]?.name ?? process.env.NEXT_PUBLIC_DEFAULT_LLM_MODEL ?? '');
                   onChange({ ...settings, llm_backend: b, llm_model: defaultModel });
                 }}
                 className={`flex-1 py-1.5 text-sm rounded-lg border transition ${
@@ -109,14 +127,33 @@ export default function Sidebar({ settings, onChange, username, onLogout, onClea
             ))}
           </div>
 
-          <label className="block text-xs text-gray-500 mb-1">Modelo (opcional)</label>
-          <input
-            type="text"
-            value={settings.llm_model}
-            onChange={(e) => update('llm_model', e.target.value)}
-            placeholder={settings.llm_backend === 'gemini' ? 'gemini-...' : (process.env.NEXT_PUBLIC_DEFAULT_LLM_MODEL ?? 'llama3.2')}
-            className="w-full border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-orange-400"
-          />
+          {settings.llm_backend === 'ollama' && ollamaModels.length > 0 ? (
+            <>
+              <label className="block text-xs text-gray-500 mb-1">Modelo</label>
+              <select
+                value={settings.llm_model}
+                onChange={(e) => update('llm_model', e.target.value)}
+                className="w-full border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-orange-400 bg-white"
+              >
+                {ollamaModels.map((m) => (
+                  <option key={m.name} value={m.name}>
+                    {m.name}{m.size ? ` (${(m.size / 1e9).toFixed(1)} GB)` : ''}
+                  </option>
+                ))}
+              </select>
+            </>
+          ) : (
+            <>
+              <label className="block text-xs text-gray-500 mb-1">Modelo{settings.llm_backend === 'ollama' ? ' (cargando...)' : ' (opcional)'}</label>
+              <input
+                type="text"
+                value={settings.llm_model}
+                onChange={(e) => update('llm_model', e.target.value)}
+                placeholder={settings.llm_backend === 'gemini' ? 'gemini-...' : (process.env.NEXT_PUBLIC_DEFAULT_LLM_MODEL ?? 'llama3.2')}
+                className="w-full border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-orange-400"
+              />
+            </>
+          )}
         </section>
       </div>
 
