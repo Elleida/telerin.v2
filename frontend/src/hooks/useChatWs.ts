@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { getToken } from '@/lib/auth';
 import { ChatFinalResult, ChatSettings } from '@/lib/types';
+import { normalizePngUrl } from '@/lib/api';
 
 // WebSocket is proxied through the Next.js custom server (server.js), so we
 // connect to the SAME origin and port as the page — works both direct (:8502)
@@ -79,7 +80,7 @@ export function useChatWs(onFinal: (result: ChatFinalResult) => void): UseChatWs
           case 'final': {
             const result: ChatFinalResult = {
               response:                msg.response ?? streamBufferRef.current.join(''),
-              sources:                 msg.sources ?? [],
+              sources:                 (msg.sources ?? []).map((s: {png_url?: string; [k: string]: unknown}) => ({ ...s, png_url: normalizePngUrl(s.png_url) })),
               sql_queries:             msg.sql_queries ?? [],
               prompt_used:             msg.prompt_used,
               query_type:              msg.query_type,

@@ -16,6 +16,20 @@ const BASE = typeof window !== 'undefined'
 // DIRECT_BASE removed: all calls (including long LLM ones) go through the
 // Next.js rewrite proxy which has proxyTimeout:120_000 in next.config.js.
 
+/**
+ * Convert any absolute image URL (e.g. http://signal4:8000/images/...)
+ * to a relative path (/teleradio/images/...) so images are always fetched
+ * through the Next.js /images rewrite — works direct and via nginx, no
+ * mixed-content issues.
+ */
+export function normalizePngUrl(url: string | undefined): string | undefined {
+  if (!url) return url;
+  // Already relative — nothing to do
+  if (!url.startsWith('http://') && !url.startsWith('https://')) return url;
+  const m = url.match(/(\/images\/.+)/);
+  return m ? (BASE_PATH + m[1]) : url;
+}
+
 async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
   const token = getToken();
   const headers: Record<string, string> = {
@@ -152,7 +166,10 @@ export const apiImageSearch = async (
     body: fd,
   });
   if (!res.ok) throw new Error(await res.text());
-  return res.json();
+  const data = await res.json() as { results: ImageSearchResult[]; description?: string; sql_query?: string };
+  // Normalize png_url to relative paths so images work behind nginx
+  data.results = (data.results ?? []).map(r => ({ ...r, png_url: normalizePngUrl(r.png_url) }));
+  return data;
 };
 
 export const apiImageDescribe = async (file: File): Promise<string> => {
