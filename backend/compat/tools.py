@@ -1483,8 +1483,9 @@ def hybrid_search(
     else:
         all_results.sort(key=lambda x: x.get("relevance_score", 0), reverse=True)
     
-    # Limitar al número de resultados solicitado
-    all_results = all_results[:limit]
+    # NO se limita aquí: el límite se aplica DESPUÉS del filtrado por umbral
+    # en generate_response_with_llm, para que el umbral evalúe el pool completo
+    # (num_tablas × limit) y no solo los primeros `limit` resultados.
     
     # Agregar URLs de documentos a los resultados
     all_results = _add_document_urls_to_results(all_results)
