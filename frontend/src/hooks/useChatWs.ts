@@ -92,6 +92,8 @@ export function useChatWs(onFinal: (result: ChatFinalResult) => void): UseChatWs
               db_search_time:          msg.db_search_time,
               reranking_time:          msg.reranking_time,
               response_time:           msg.response_time,
+              prompt_tokens:           msg.prompt_tokens,
+              response_tokens:         msg.response_tokens,
               error:                   msg.error,
               success:                 msg.success,
             };
