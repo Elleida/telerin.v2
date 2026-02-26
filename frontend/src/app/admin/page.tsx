@@ -27,11 +27,11 @@ export default function AdminPage() {
 
   // Edit state
   const [editId, setEditId] = useState<string | null>(null);
-  const [editData, setEditData] = useState({ username: '', email: '', role: 'user', password: '' });
+  const [editData, setEditData] = useState({ username: '', email: '', role: 'user', password: '', first_name: '', last_name: '' });
 
   // New user form
   const [showNew, setShowNew] = useState(false);
-  const [newData, setNewData] = useState({ username: '', email: '', role: 'user', password: '' });
+  const [newData, setNewData] = useState({ username: '', email: '', role: 'user', password: '', first_name: '', last_name: '' });
   const [newError, setNewError] = useState('');
 
   // Delete confirmation
@@ -58,7 +58,8 @@ export default function AdminPage() {
 
   function startEdit(u: UserPublic) {
     setEditId(u.id);
-    setEditData({ username: u.username, email: u.email ?? '', role: u.role, password: '' });
+    setEditData({ username: u.username, email: u.email ?? '', role: u.role, password: '',
+                  first_name: u.first_name ?? '', last_name: u.last_name ?? '' });
   }
 
   async function saveEdit() {
@@ -68,6 +69,8 @@ export default function AdminPage() {
     if (editData.email) payload.email = editData.email;
     if (editData.role) payload.role = editData.role;
     if (editData.password) payload.password = editData.password;
+    if (editData.first_name !== undefined) payload.first_name = editData.first_name;
+    if (editData.last_name !== undefined) payload.last_name = editData.last_name;
     try {
       const updated = await apiUpdateUser(editId, payload);
       setUsers(us => us.map(u => u.id === editId ? updated : u));
@@ -97,7 +100,7 @@ export default function AdminPage() {
       const created = await apiCreateUser(newData);
       setUsers(us => [...us, created]);
       setShowNew(false);
-      setNewData({ username: '', email: '', role: 'user', password: '' });
+      setNewData({ username: '', email: '', role: 'user', password: '', first_name: '', last_name: '' });
     } catch (e: unknown) {
       setNewError(e instanceof Error ? e.message : 'Error creando usuario');
     }
@@ -162,6 +165,24 @@ export default function AdminPage() {
                 />
               </div>
               <div>
+                <label className="block text-xs text-gray-400 mb-1">Nombre</label>
+                <input
+                  className="w-full bg-gray-900 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
+                  value={newData.first_name}
+                  onChange={e => setNewData(d => ({ ...d, first_name: e.target.value }))}
+                  placeholder="Nombre"
+                />
+              </div>
+              <div>
+                <label className="block text-xs text-gray-400 mb-1">Apellidos</label>
+                <input
+                  className="w-full bg-gray-900 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
+                  value={newData.last_name}
+                  onChange={e => setNewData(d => ({ ...d, last_name: e.target.value }))}
+                  placeholder="Apellidos"
+                />
+              </div>
+              <div>
                 <label className="block text-xs text-gray-400 mb-1">Contraseña *</label>
                 <input
                   className="w-full bg-gray-900 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
@@ -201,6 +222,8 @@ export default function AdminPage() {
                 <tr>
                   <th className="px-4 py-3 text-left">ID</th>
                   <th className="px-4 py-3 text-left">Usuario</th>
+                  <th className="px-4 py-3 text-left">Nombre</th>
+                  <th className="px-4 py-3 text-left">Apellidos</th>
                   <th className="px-4 py-3 text-left">Email</th>
                   <th className="px-4 py-3 text-left">Rol</th>
                   <th className="px-4 py-3 text-left">Creado</th>
@@ -210,7 +233,7 @@ export default function AdminPage() {
               <tbody className="divide-y divide-gray-700">
                 {users.length === 0 && (
                   <tr>
-                    <td colSpan={6} className="text-center text-gray-500 py-8">Sin usuarios</td>
+                    <td colSpan={8} className="text-center text-gray-500 py-8">Sin usuarios</td>
                   </tr>
                 )}
                 {users.map(u => (
@@ -223,6 +246,22 @@ export default function AdminPage() {
                           className="w-full bg-gray-900 border border-gray-600 rounded px-2 py-1 text-white text-sm focus:outline-none focus:border-blue-500"
                           value={editData.username}
                           onChange={e => setEditData(d => ({ ...d, username: e.target.value }))}
+                        />
+                      </td>
+                      <td className="px-4 py-2">
+                        <input
+                          className="w-full bg-gray-900 border border-gray-600 rounded px-2 py-1 text-white text-sm focus:outline-none focus:border-blue-500"
+                          value={editData.first_name}
+                          onChange={e => setEditData(d => ({ ...d, first_name: e.target.value }))}
+                          placeholder="Nombre"
+                        />
+                      </td>
+                      <td className="px-4 py-2">
+                        <input
+                          className="w-full bg-gray-900 border border-gray-600 rounded px-2 py-1 text-white text-sm focus:outline-none focus:border-blue-500"
+                          value={editData.last_name}
+                          onChange={e => setEditData(d => ({ ...d, last_name: e.target.value }))}
+                          placeholder="Apellidos"
                         />
                       </td>
                       <td className="px-4 py-2">
@@ -261,7 +300,7 @@ export default function AdminPage() {
                   ) : confirmDel === u.id ? (
                     /* ── Delete confirmation row ── */
                     <tr key={u.id} className="bg-red-900/20">
-                      <td colSpan={5} className="px-4 py-3 text-red-300 text-sm">
+                      <td colSpan={7} className="px-4 py-3 text-red-300 text-sm">
                         ¿Eliminar usuario <strong>{u.username}</strong>? Esta acción no se puede deshacer.
                       </td>
                       <td className="px-4 py-3 text-right">
@@ -276,6 +315,8 @@ export default function AdminPage() {
                     <tr key={u.id} className="hover:bg-gray-700/40 transition-colors">
                       <td className="px-4 py-3 text-gray-500 font-mono text-xs">{u.id.slice(0, 8)}…</td>
                       <td className="px-4 py-3 font-medium text-white">{u.username}</td>
+                      <td className="px-4 py-3 text-gray-300">{u.first_name ?? '—'}</td>
+                      <td className="px-4 py-3 text-gray-300">{u.last_name ?? '—'}</td>
                       <td className="px-4 py-3 text-gray-400">{u.email ?? '—'}</td>
                       <td className="px-4 py-3">
                         <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${u.role === 'admin' ? 'bg-purple-900/60 text-purple-300' : 'bg-gray-700 text-gray-300'}`}>

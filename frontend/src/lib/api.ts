@@ -62,20 +62,22 @@ export interface UserPublic {
   username: string;
   email?: string;
   role: string;
+  first_name?: string;
+  last_name?: string;
   created_at?: string;
 }
 
 export const apiGetUsers = () =>
   apiFetch<UserPublic[]>('/api/auth/users');
 
-export const apiCreateUser = (data: { username: string; password: string; email?: string; role: string }) =>
+export const apiCreateUser = (data: { username: string; password: string; email?: string; role: string; first_name?: string; last_name?: string }) =>
   apiFetch<UserPublic>('/api/auth/users', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(data),
   });
 
-export const apiUpdateUser = (id: string, data: { username?: string; email?: string; role?: string; password?: string }) =>
+export const apiUpdateUser = (id: string, data: { username?: string; email?: string; role?: string; password?: string; first_name?: string; last_name?: string }) =>
   apiFetch<UserPublic>(`/api/auth/users/${id}`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },

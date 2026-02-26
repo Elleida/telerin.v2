@@ -26,6 +26,8 @@ class UserCreate(BaseModel):
     password: str
     email: Optional[str] = None
     role: str = "user"  # "user" | "admin"
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
 
 
 class UserUpdate(BaseModel):
@@ -33,6 +35,8 @@ class UserUpdate(BaseModel):
     email: Optional[str] = None
     role: Optional[str] = None
     password: Optional[str] = None  # si se envía, se cambia la contraseña
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
 
 
 class UserPublic(BaseModel):
@@ -40,6 +44,8 @@ class UserPublic(BaseModel):
     username: str
     email: Optional[str] = None
     role: str
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
     created_at: Optional[Union[str, int]] = None
 
     @field_validator('created_at', mode='before')

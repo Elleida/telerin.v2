@@ -90,9 +90,17 @@ def ensure_users_table() -> None:
             email         TEXT,
             hashed_password TEXT NOT NULL,
             role          TEXT DEFAULT 'user',
+            first_name    TEXT,
+            last_name     TEXT,
             created_at    TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
         )
     """)
+    # Migración: añadir columnas si la tabla ya existía sin ellas
+    for col in ("first_name TEXT", "last_name TEXT"):
+        try:
+            _cratedb(f"ALTER TABLE telerin_users ADD COLUMN IF NOT EXISTS {col}")
+        except Exception:
+            pass
     # índice único sobre username
     try:
         _cratedb("CREATE INDEX IF NOT EXISTS idx_telerin_users_username ON telerin_users (username)")
@@ -105,7 +113,7 @@ def ensure_users_table() -> None:
 def get_user_by_username(username: str) -> Optional[dict]:
     try:
         result = _cratedb(
-            "SELECT id, username, email, hashed_password, role, created_at FROM telerin_users WHERE username = ? LIMIT 1",
+            "SELECT id, username, email, hashed_password, role, first_name, last_name, created_at FROM telerin_users WHERE username = ? LIMIT 1",
             [username],
         )
         rows = result.get("rows", [])
@@ -120,7 +128,7 @@ def get_user_by_username(username: str) -> Optional[dict]:
 def get_user_by_id(user_id: str) -> Optional[dict]:
     try:
         result = _cratedb(
-            "SELECT id, username, email, hashed_password, role, created_at FROM telerin_users WHERE id = ? LIMIT 1",
+            "SELECT id, username, email, hashed_password, role, first_name, last_name, created_at FROM telerin_users WHERE id = ? LIMIT 1",
             [user_id],
         )
         rows = result.get("rows", [])
@@ -132,7 +140,8 @@ def get_user_by_id(user_id: str) -> Optional[dict]:
         return None
 
 
-def create_user(username: str, password: str, email: str | None = None, role: str = "user") -> dict:
+def create_user(username: str, password: str, email: str | None = None, role: str = "user",
+                first_name: str | None = None, last_name: str | None = None) -> dict:
     existing = get_user_by_username(username)
     if existing:
         raise ValueError(f"El usuario '{username}' ya existe")
@@ -141,10 +150,11 @@ def create_user(username: str, password: str, email: str | None = None, role: st
     safe_pw = _truncate_password(password)
     hashed = pwd_context.hash(safe_pw)
     _cratedb(
-        "INSERT INTO telerin_users (id, username, email, hashed_password, role) VALUES (?, ?, ?, ?, ?)",
-        [user_id, username, email, hashed, role],
+        "INSERT INTO telerin_users (id, username, email, hashed_password, role, first_name, last_name) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        [user_id, username, email, hashed, role, first_name, last_name],
     )
-    return {"id": user_id, "username": username, "email": email, "role": role}
+    return {"id": user_id, "username": username, "email": email, "role": role,
+            "first_name": first_name, "last_name": last_name}
 
 
 def verify_password(plain: str, hashed: str) -> bool:
@@ -163,7 +173,7 @@ def authenticate_user(username: str, password: str) -> Optional[dict]:
 def list_users() -> list[dict]:
     try:
         result = _cratedb(
-            "SELECT id, username, email, role, created_at FROM telerin_users ORDER BY created_at DESC"
+            "SELECT id, username, email, role, first_name, last_name, created_at FROM telerin_users ORDER BY created_at DESC"
         )
         cols = result.get("cols", [])
         return [dict(zip(cols, row)) for row in result.get("rows", [])]
@@ -171,7 +181,8 @@ def list_users() -> list[dict]:
         return []
 
 
-def update_user(user_id: str, username: str | None, email: str | None, role: str | None, password: str | None) -> bool:
+def update_user(user_id: str, username: str | None, email: str | None, role: str | None, password: str | None,
+                first_name: str | None = None, last_name: str | None = None) -> bool:
     """Actualiza los campos no-None de un usuario."""
     fields, args = [], []
     if username is not None:
@@ -186,6 +197,12 @@ def update_user(user_id: str, username: str | None, email: str | None, role: str
     if password is not None:
         fields.append("hashed_password = ?")
         args.append(pwd_context.hash(_truncate_password(password)))
+    if first_name is not None:
+        fields.append("first_name = ?")
+        args.append(first_name)
+    if last_name is not None:
+        fields.append("last_name = ?")
+        args.append(last_name)
     if not fields:
         return True  # nada que actualizar
     args.append(user_id)

@@ -66,7 +66,8 @@ async def get_users(_: dict = Depends(get_current_admin)):
 @router.post("/users", response_model=UserPublic, status_code=status.HTTP_201_CREATED)
 async def create_new_user(body: UserCreate, _: dict = Depends(get_current_admin)):
     try:
-        user = create_user(body.username, body.password, body.email, body.role)
+        user = create_user(body.username, body.password, body.email, body.role,
+                           body.first_name, body.last_name)
         return UserPublic(**user)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc))
@@ -81,7 +82,8 @@ async def remove_user(user_id: str, _: dict = Depends(get_current_admin)):
 
 @router.patch("/users/{user_id}", response_model=UserPublic)
 async def update_existing_user(user_id: str, body: UserUpdate, _: dict = Depends(get_current_admin)):
-    ok = update_user(user_id, body.username, body.email, body.role, body.password)
+    ok = update_user(user_id, body.username, body.email, body.role, body.password,
+                     body.first_name, body.last_name)
     if not ok:
         raise HTTPException(status_code=404, detail="Usuario no encontrado o error actualizando")
     from backend.services.auth import get_user_by_id
