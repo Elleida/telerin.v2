@@ -51,6 +51,11 @@ export default function ChatPanel({
   ]);
   const [input, setInput] = useState('');
   const [feedbackGiven, setFeedbackGiven] = useState<Record<string, 'up' | 'down'>>({});
+  // Valoración negativa pendiente de comentario
+  const [pendingDownvote, setPendingDownvote] = useState<{
+    msgId: string; query: string; msg: ChatMessage;
+  } | null>(null);
+  const [commentText, setCommentText] = useState('');
   const bottomRef = useRef<HTMLDivElement>(null);
 
   const handleFinal = useCallback((result: ChatFinalResult) => {
@@ -94,6 +99,8 @@ export default function ChatPanel({
     clearConv();
     setMessages([{ id: 'greeting', role: 'assistant', content: GREETING }]);
     setFeedbackGiven({});
+    setPendingDownvote(null);
+    setCommentText('');
     onClear?.();
   };
 
@@ -104,17 +111,15 @@ export default function ChatPanel({
     }
   };
 
-  const handleFeedback = async (msg: ChatMessage, allMsgs: ChatMessage[], rating: 'up' | 'down') => {
-    if (feedbackGiven[msg.id]) return; // ya valorado
-    setFeedbackGiven((prev) => ({ ...prev, [msg.id]: rating }));
-    // Buscar la query del mensaje usuario anterior
-    const idx = allMsgs.findIndex((m) => m.id === msg.id);
-    const query = idx > 0 ? allMsgs[idx - 1].content : '';
+  const submitFeedback = async (
+    msg: ChatMessage, query: string, rating: 'up' | 'down', comment?: string
+  ) => {
     try {
       await apiFeedback({
         query,
         response: msg.content,
         rating,
+        comment,
         db_search_time: msg.result?.db_search_time ?? 0,
         reranking_time: msg.result?.reranking_time ?? 0,
         response_time: msg.result?.response_time ?? 0,
@@ -126,6 +131,32 @@ export default function ChatPanel({
     } catch {
       // silencioso — el log de backend ya captura errores
     }
+  };
+
+  const handleFeedback = (msg: ChatMessage, allMsgs: ChatMessage[], rating: 'up' | 'down') => {
+    if (feedbackGiven[msg.id]) return;
+    setFeedbackGiven((prev) => ({ ...prev, [msg.id]: rating }));
+    const idx = allMsgs.findIndex((m) => m.id === msg.id);
+    const query = idx > 0 ? allMsgs[idx - 1].content : '';
+    if (rating === 'down') {
+      // Mostrar cajetín de comentario antes de enviar
+      setPendingDownvote({ msgId: msg.id, query, msg });
+      setCommentText('');
+    } else {
+      submitFeedback(msg, query, 'up');
+    }
+  };
+
+  const handleCommentSubmit = (skip = false) => {
+    if (!pendingDownvote) return;
+    submitFeedback(
+      pendingDownvote.msg,
+      pendingDownvote.query,
+      'down',
+      skip ? undefined : commentText.trim() || undefined,
+    );
+    setPendingDownvote(null);
+    setCommentText('');
   };
 
   return (
@@ -190,38 +221,69 @@ export default function ChatPanel({
                   )}
                   {/* Feedback buttons — solo en mensajes reales (no el saludo) */}
                   {msg.result && (
-                    <div className="flex items-center gap-2 mt-2">
-                      <span className="text-xs text-gray-400">¿Fue útil?</span>
-                      <button
-                        onClick={() => handleFeedback(msg, messages, 'up')}
-                        disabled={!!feedbackGiven[msg.id]}
-                        title="Respuesta correcta"
-                        className={clsx(
-                          'text-base transition',
-                          feedbackGiven[msg.id] === 'up'
-                            ? 'opacity-100 scale-110'
-                            : feedbackGiven[msg.id] === 'down'
-                            ? 'opacity-25 cursor-not-allowed'
-                            : 'opacity-50 hover:opacity-100 hover:scale-110',
-                        )}
-                      >
-                        👍
-                      </button>
-                      <button
-                        onClick={() => handleFeedback(msg, messages, 'down')}
-                        disabled={!!feedbackGiven[msg.id]}
-                        title="Respuesta incorrecta"
-                        className={clsx(
-                          'text-base transition',
-                          feedbackGiven[msg.id] === 'down'
-                            ? 'opacity-100 scale-110'
-                            : feedbackGiven[msg.id] === 'up'
-                            ? 'opacity-25 cursor-not-allowed'
-                            : 'opacity-50 hover:opacity-100 hover:scale-110',
-                        )}
-                      >
-                        👎
-                      </button>
+                    <div className="mt-2 space-y-2">
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs text-gray-400">¿Fue útil?</span>
+                        <button
+                          onClick={() => handleFeedback(msg, messages, 'up')}
+                          disabled={!!feedbackGiven[msg.id]}
+                          title="Respuesta correcta"
+                          className={clsx(
+                            'text-base transition',
+                            feedbackGiven[msg.id] === 'up'
+                              ? 'opacity-100 scale-110'
+                              : feedbackGiven[msg.id] === 'down'
+                              ? 'opacity-25 cursor-not-allowed'
+                              : 'opacity-50 hover:opacity-100 hover:scale-110',
+                          )}
+                        >
+                          👍
+                        </button>
+                        <button
+                          onClick={() => handleFeedback(msg, messages, 'down')}
+                          disabled={!!feedbackGiven[msg.id]}
+                          title="Respuesta incorrecta"
+                          className={clsx(
+                            'text-base transition',
+                            feedbackGiven[msg.id] === 'down'
+                              ? 'opacity-100 scale-110'
+                              : feedbackGiven[msg.id] === 'up'
+                              ? 'opacity-25 cursor-not-allowed'
+                              : 'opacity-50 hover:opacity-100 hover:scale-110',
+                          )}
+                        >
+                          👎
+                        </button>
+                      </div>
+
+                      {/* Cajetín de comentario tras valoración negativa */}
+                      {pendingDownvote?.msgId === msg.id && (
+                        <div className="bg-red-50 border border-red-200 rounded-xl p-3 space-y-2">
+                          <p className="text-xs font-medium text-red-700">¿Qué estaba mal en la respuesta?</p>
+                          <textarea
+                            autoFocus
+                            rows={3}
+                            value={commentText}
+                            onChange={(e) => setCommentText(e.target.value)}
+                            placeholder="Escribe tu comentario (opcional)..."
+                            className="w-full text-xs resize-none border border-red-200 rounded-lg px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-red-300 bg-white"
+                          />
+                          <div className="flex gap-2 justify-end">
+                            <button
+                              onClick={() => handleCommentSubmit(true)}
+                              className="text-xs text-gray-400 hover:text-gray-600 px-2 py-1 rounded transition"
+                            >
+                              Saltar
+                            </button>
+                            <button
+                              onClick={() => handleCommentSubmit(false)}
+                              className="text-xs bg-red-500 text-white px-3 py-1 rounded-lg hover:bg-red-600 transition"
+                            >
+                              Enviar comentario
+                            </button>
+                          </div>
+                        </div>
+                      )}
                     </div>
                   )}
                 </>
