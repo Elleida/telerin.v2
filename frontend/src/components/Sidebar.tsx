@@ -28,10 +28,12 @@ export default function Sidebar({ settings, onChange, username, onLogout, onClea
     if (settings.llm_backend !== 'ollama') return;
     apiGetModels()
       .then((data) => {
-        setOllamaModels(data.ollama ?? []);
+        const ALLOWED = /^(qwen|glm|gemma3)/i;
+        const filtered = (data.ollama ?? []).filter((m) => ALLOWED.test(m.name));
+        setOllamaModels(filtered);
         // Si el modelo actual no está en la lista, seleccionar el primero
-        if (data.ollama?.length && !data.ollama.find((m) => m.name === settings.llm_model)) {
-          onChange({ ...settings, llm_model: data.ollama[0].name });
+        if (filtered.length && !filtered.find((m) => m.name === settings.llm_model)) {
+          onChange({ ...settings, llm_model: filtered[0].name });
         }
       })
       .catch(() => setOllamaModels([]));
