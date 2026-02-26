@@ -4,17 +4,16 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { getToken } from '@/lib/auth';
 import { ChatFinalResult, ChatSettings } from '@/lib/types';
 
-// WebSocket connects directly to the backend (Next.js rewrites don't proxy WS).
-// We use the same hostname as the page but the backend port (8000), so this works
-// regardless of what host the user is on.
-const _wsProto = typeof window !== 'undefined' && window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-const _wsHost  = typeof window !== 'undefined' ? window.location.hostname : 'localhost';
-const _wsPort  = process.env.NEXT_PUBLIC_WS_URL
-  ? new URL(process.env.NEXT_PUBLIC_WS_URL.replace(/^ws/, 'http')).port || '8000'
-  : '8000';
-const WS_BASE  = typeof window !== 'undefined'
-  ? `${_wsProto}//${_wsHost}:${_wsPort}`
-  : (process.env.NEXT_PUBLIC_WS_URL ?? 'ws://localhost:8000');
+// WebSocket is proxied through the Next.js custom server (server.js), so we
+// connect to the SAME origin and port as the page — works both direct (:8502)
+// and via any nginx reverse proxy (no need for port 8000 to be reachable).
+// server.js strips the basePath prefix and forwards to ws://localhost:8000/api/ws/*.
+const _wsProto  = typeof window !== 'undefined' && window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+const _wsOrigin = typeof window !== 'undefined'
+  ? `${_wsProto}//${window.location.host}`   // same host + port as the page
+  : (process.env.NEXT_PUBLIC_WS_URL ?? 'ws://localhost:8502');
+const _basePath = process.env.NEXT_PUBLIC_BASE_PATH ?? '';
+const WS_BASE   = _wsOrigin + _basePath; // e.g. ws://dihana.unizar.es/teleradio
 
 type WsStatus = 'disconnected' | 'connecting' | 'authenticated' | 'error';
 type StatusLabel = string;
