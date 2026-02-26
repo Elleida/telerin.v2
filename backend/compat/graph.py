@@ -467,11 +467,11 @@ Ejecuta la búsqueda apropiada ahora."""
                             if tool_results_list:
                                 search_results.extend(tool_results_list)
                             if 'search_time' in result_data:
-                                search_time = result_data['search_time']
+                                search_time += result_data['search_time']
                             if 'db_search_time' in result_data:
-                                db_search_time = result_data['db_search_time']
+                                db_search_time += result_data['db_search_time']
                             if 'reranking_time' in result_data:
-                                reranking_time = result_data['reranking_time']
+                                reranking_time += result_data['reranking_time']
                             if 'search_classification' in result_data:
                                 search_classification = result_data['search_classification']
                     except Exception:
