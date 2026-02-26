@@ -36,3 +36,6 @@ Thumbs.db
 # Datos y caché temporal
 *.db
 *.sqlite
+
+# Feedback log
+backend/feedback.log

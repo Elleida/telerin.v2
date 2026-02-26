@@ -55,6 +55,23 @@ export const apiClearSession = () =>
 
 // ── Image ──────────────────────────────────────────────────────────────────
 
+// ── Feedback ──────────────────────────────────────────────────────────────
+
+export const apiFeedback = (payload: {
+  session_id?: string;
+  query: string;
+  response: string;
+  rating: 'up' | 'down';
+  comment?: string;
+}) =>
+  apiFetch<{ ok: boolean }>('/api/feedback', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+
+// ── Image ──────────────────────────────────────────────────────────────────
+
 export const apiImageSearch = async (
   file: File | null,
   textQuery: string,

@@ -12,7 +12,7 @@ from fastapi.staticfiles import StaticFiles
 
 from backend.config import CORS_ORIGINS
 from backend.services.auth import ensure_users_table
-from backend.routers import auth, chat, image, session
+from backend.routers import auth, chat, feedback, image, session
 
 app = FastAPI(
     title="TeleRadio Multi-Agent API",
@@ -32,6 +32,7 @@ app.add_middleware(
 # ── Routers ────────────────────────────────────────────────────────────────
 app.include_router(auth.router)
 app.include_router(chat.router)
+app.include_router(feedback.router)
 app.include_router(image.router)
 app.include_router(session.router)
 

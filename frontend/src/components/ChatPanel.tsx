@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import clsx from 'clsx';
+import { apiFeedback } from '@/lib/api';
 import { ChatFinalResult, ChatMessage, ChatSettings } from '@/lib/types';
 import { useChatWs } from '@/hooks/useChatWs';
 
@@ -49,6 +50,7 @@ export default function ChatPanel({
     { id: 'greeting', role: 'assistant', content: GREETING },
   ]);
   const [input, setInput] = useState('');
+  const [feedbackGiven, setFeedbackGiven] = useState<Record<string, 'up' | 'down'>>({});
   const bottomRef = useRef<HTMLDivElement>(null);
 
   const handleFinal = useCallback((result: ChatFinalResult) => {
@@ -91,6 +93,7 @@ export default function ChatPanel({
   const handleClear = () => {
     clearConv();
     setMessages([{ id: 'greeting', role: 'assistant', content: GREETING }]);
+    setFeedbackGiven({});
     onClear?.();
   };
 
@@ -98,6 +101,23 @@ export default function ChatPanel({
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       handleSend();
+    }
+  };
+
+  const handleFeedback = async (msg: ChatMessage, allMsgs: ChatMessage[], rating: 'up' | 'down') => {
+    if (feedbackGiven[msg.id]) return; // ya valorado
+    setFeedbackGiven((prev) => ({ ...prev, [msg.id]: rating }));
+    // Buscar la query del mensaje usuario anterior
+    const idx = allMsgs.findIndex((m) => m.id === msg.id);
+    const query = idx > 0 ? allMsgs[idx - 1].content : '';
+    try {
+      await apiFeedback({
+        query,
+        response: msg.content,
+        rating,
+      });
+    } catch {
+      // silencioso — el log de backend ya captura errores
     }
   };
 
@@ -160,6 +180,42 @@ export default function ChatPanel({
                     <p className="text-xs italic text-gray-400 mt-1">
                       🔍 Interpretado como: {msg.result.enhanced_query}
                     </p>
+                  )}
+                  {/* Feedback buttons — solo en mensajes reales (no el saludo) */}
+                  {msg.result && (
+                    <div className="flex items-center gap-2 mt-2">
+                      <span className="text-xs text-gray-400">¿Fue útil?</span>
+                      <button
+                        onClick={() => handleFeedback(msg, messages, 'up')}
+                        disabled={!!feedbackGiven[msg.id]}
+                        title="Respuesta correcta"
+                        className={clsx(
+                          'text-base transition',
+                          feedbackGiven[msg.id] === 'up'
+                            ? 'opacity-100 scale-110'
+                            : feedbackGiven[msg.id] === 'down'
+                            ? 'opacity-25 cursor-not-allowed'
+                            : 'opacity-50 hover:opacity-100 hover:scale-110',
+                        )}
+                      >
+                        👍
+                      </button>
+                      <button
+                        onClick={() => handleFeedback(msg, messages, 'down')}
+                        disabled={!!feedbackGiven[msg.id]}
+                        title="Respuesta incorrecta"
+                        className={clsx(
+                          'text-base transition',
+                          feedbackGiven[msg.id] === 'down'
+                            ? 'opacity-100 scale-110'
+                            : feedbackGiven[msg.id] === 'up'
+                            ? 'opacity-25 cursor-not-allowed'
+                            : 'opacity-50 hover:opacity-100 hover:scale-110',
+                        )}
+                      >
+                        👎
+                      </button>
+                    </div>
                   )}
                 </>
               ) : (
