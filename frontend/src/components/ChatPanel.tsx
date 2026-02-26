@@ -50,12 +50,9 @@ export default function ChatPanel({
     { id: 'greeting', role: 'assistant', content: GREETING },
   ]);
   const [input, setInput] = useState('');
-  const [feedbackGiven, setFeedbackGiven] = useState<Record<string, 'up' | 'down'>>({});
-  // Valoración negativa pendiente de comentario
-  const [pendingDownvote, setPendingDownvote] = useState<{
-    msgId: string; query: string; msg: ChatMessage;
-  } | null>(null);
-  const [commentText, setCommentText] = useState('');
+const [feedbackGiven, setFeedbackGiven] = useState<Record<string, 'up' | 'down'>>({});
+  const [pendingCommentId, setPendingCommentId] = useState<string | null>(null);
+  const [commentText, setCommentText]         = useState('');
   const bottomRef = useRef<HTMLDivElement>(null);
 
   const handleFinal = useCallback((result: ChatFinalResult) => {
@@ -99,7 +96,7 @@ export default function ChatPanel({
     clearConv();
     setMessages([{ id: 'greeting', role: 'assistant', content: GREETING }]);
     setFeedbackGiven({});
-    setPendingDownvote(null);
+    setPendingCommentId(null);
     setCommentText('');
     onClear?.();
   };
@@ -111,9 +108,9 @@ export default function ChatPanel({
     }
   };
 
-  const submitFeedback = async (
-    msg: ChatMessage, query: string, rating: 'up' | 'down', comment?: string
-  ) => {
+  const sendFeedback = async (msg: ChatMessage, allMsgs: ChatMessage[], rating: 'up' | 'down', comment = '') => {
+    const idx = allMsgs.findIndex((m) => m.id === msg.id);
+    const query = idx > 0 ? allMsgs[idx - 1].content : '';
     try {
       await apiFeedback({
         query,
@@ -133,30 +130,24 @@ export default function ChatPanel({
     }
   };
 
-  const handleFeedback = (msg: ChatMessage, allMsgs: ChatMessage[], rating: 'up' | 'down') => {
-    if (feedbackGiven[msg.id]) return;
-    setFeedbackGiven((prev) => ({ ...prev, [msg.id]: rating }));
-    const idx = allMsgs.findIndex((m) => m.id === msg.id);
-    const query = idx > 0 ? allMsgs[idx - 1].content : '';
+  const handleFeedback = async (msg: ChatMessage, allMsgs: ChatMessage[], rating: 'up' | 'down') => {
+    if (feedbackGiven[msg.id]) return; // ya valorado
     if (rating === 'down') {
       // Mostrar cajetín de comentario antes de enviar
-      setPendingDownvote({ msgId: msg.id, query, msg });
+      setPendingCommentId(msg.id);
       setCommentText('');
     } else {
-      submitFeedback(msg, query, 'up');
+      setFeedbackGiven((prev) => ({ ...prev, [msg.id]: rating }));
+      await sendFeedback(msg, allMsgs, rating);
     }
   };
 
-  const handleCommentSubmit = (skip = false) => {
-    if (!pendingDownvote) return;
-    submitFeedback(
-      pendingDownvote.msg,
-      pendingDownvote.query,
-      'down',
-      skip ? undefined : commentText.trim() || undefined,
-    );
-    setPendingDownvote(null);
+  const handleCommentSubmit = async (msg: ChatMessage, allMsgs: ChatMessage[], skip = false) => {
+    const comment = skip ? '' : commentText.trim();
+    setFeedbackGiven((prev) => ({ ...prev, [msg.id]: 'down' }));
+    setPendingCommentId(null);
     setCommentText('');
+    await sendFeedback(msg, allMsgs, 'down', comment);
   };
 
   return (
@@ -221,12 +212,12 @@ export default function ChatPanel({
                   )}
                   {/* Feedback buttons — solo en mensajes reales (no el saludo) */}
                   {msg.result && (
-                    <div className="mt-2 space-y-2">
+                    <div className="mt-2">
                       <div className="flex items-center gap-2">
                         <span className="text-xs text-gray-400">¿Fue útil?</span>
                         <button
                           onClick={() => handleFeedback(msg, messages, 'up')}
-                          disabled={!!feedbackGiven[msg.id]}
+                          disabled={!!feedbackGiven[msg.id] || pendingCommentId === msg.id}
                           title="Respuesta correcta"
                           className={clsx(
                             'text-base transition',
@@ -241,13 +232,13 @@ export default function ChatPanel({
                         </button>
                         <button
                           onClick={() => handleFeedback(msg, messages, 'down')}
-                          disabled={!!feedbackGiven[msg.id]}
+                          disabled={!!feedbackGiven[msg.id] || pendingCommentId === msg.id}
                           title="Respuesta incorrecta"
                           className={clsx(
                             'text-base transition',
                             feedbackGiven[msg.id] === 'down'
                               ? 'opacity-100 scale-110'
-                              : feedbackGiven[msg.id] === 'up'
+                              : feedbackGiven[msg.id] === 'up' || pendingCommentId === msg.id
                               ? 'opacity-25 cursor-not-allowed'
                               : 'opacity-50 hover:opacity-100 hover:scale-110',
                           )}
@@ -256,30 +247,30 @@ export default function ChatPanel({
                         </button>
                       </div>
 
-                      {/* Cajetín de comentario tras valoración negativa */}
-                      {pendingDownvote?.msgId === msg.id && (
-                        <div className="bg-red-50 border border-red-200 rounded-xl p-3 space-y-2">
-                          <p className="text-xs font-medium text-red-700">¿Qué estaba mal en la respuesta?</p>
+                      {/* Cajetín de comentario — aparece tras pulsar 👎 */}
+                      {pendingCommentId === msg.id && (
+                        <div className="mt-2 border border-red-200 rounded-xl bg-red-50 p-3 space-y-2">
+                          <p className="text-xs text-red-600 font-medium">¿Qué ha fallado? (opcional)</p>
                           <textarea
-                            autoFocus
                             rows={3}
+                            autoFocus
                             value={commentText}
                             onChange={(e) => setCommentText(e.target.value)}
-                            placeholder="Escribe tu comentario (opcional)..."
-                            className="w-full text-xs resize-none border border-red-200 rounded-lg px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-red-300 bg-white"
+                            placeholder="Describe brevemente el problema..."
+                            className="w-full resize-none border border-red-300 rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-red-300"
                           />
                           <div className="flex gap-2 justify-end">
                             <button
-                              onClick={() => handleCommentSubmit(true)}
-                              className="text-xs text-gray-400 hover:text-gray-600 px-2 py-1 rounded transition"
+                              onClick={() => handleCommentSubmit(msg, messages, true)}
+                              className="text-xs text-gray-400 hover:text-gray-600 transition px-2 py-1 rounded"
                             >
                               Saltar
                             </button>
                             <button
-                              onClick={() => handleCommentSubmit(false)}
-                              className="text-xs bg-red-500 text-white px-3 py-1 rounded-lg hover:bg-red-600 transition"
+                              onClick={() => handleCommentSubmit(msg, messages, false)}
+                              className="text-xs bg-red-500 hover:bg-red-600 text-white px-3 py-1 rounded-lg transition"
                             >
-                              Enviar comentario
+                              Enviar
                             </button>
                           </div>
                         </div>
