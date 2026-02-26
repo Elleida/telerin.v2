@@ -45,17 +45,8 @@ from backend.compat.context_extractor import ConversationContextExtractor
 _ENTITY_EXTRACTOR = ConversationContextExtractor()
 
 def _extract_entities(query: str, response: str, search_results: list) -> dict:
-    """Extrae entidades de la query, respuesta y resultados de búsqueda."""
-    try:
-        entities = _ENTITY_EXTRACTOR.extract_entities_from_text(query + " " + response[:500])
-        result_entities = _ENTITY_EXTRACTOR.extract_entities_from_results(search_results)
-        for key in entities:
-            entities[key] = set(entities.get(key, set())) | set(result_entities.get(key, set()))
-        # Convertir sets a listas para serializar
-        return {k: list(v) for k, v in entities.items()}
-    except Exception as e:
-        print(f"⚠️ Error extrayendo entidades: {e}")
-        return {}
+    """Extracción de entidades deshabilitada — el historial completo se pasa al LLM."""
+    return {}
 
 
 _MONTHS_ES = {
