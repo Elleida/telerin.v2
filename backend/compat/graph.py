@@ -452,7 +452,9 @@ Ejecuta la búsqueda apropiada ahora."""
                     handler("__DB_SEARCH__")
             except Exception:
                 pass
+            _t0_tools = time.time()
             tool_results = tool_node.invoke(tool_messages)
+            _tool_elapsed = time.time() - _t0_tools
 
             for msg in tool_results.get('messages', []):
                 if hasattr(msg, 'content'):
@@ -474,6 +476,12 @@ Ejecuta la búsqueda apropiada ahora."""
                                 search_classification = result_data['search_classification']
                     except Exception:
                         pass
+
+            # Si ninguna herramienta reportó sus propios tiempos, usar el tiempo
+            # total de ejecución del ToolNode como db_search_time de referencia
+            if db_search_time == 0.0 and search_time == 0.0:
+                db_search_time = round(_tool_elapsed, 3)
+                search_time = db_search_time
         else:
             # fallback to hybrid_search (el agente no generó tool_calls)
             try:
