@@ -156,6 +156,7 @@ function StatsTab() {
                   <p className="text-xs text-gray-500 mt-0.5">
                     {formatDate(e.ts)} · <span className="text-gray-400">{e.user}</span>
                     {' · '}{e.num_sources} fuentes · {fmt(e.total_s, 1)}s
+                    {e.llm_model && <> · <span className="text-purple-400">{e.llm_model}</span></>}
                   </p>
                 </div>
                 <span className="text-lg shrink-0">{e.rating === 'up' ? '👍' : '👎'}</span>

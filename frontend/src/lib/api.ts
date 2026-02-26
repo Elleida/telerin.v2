@@ -94,7 +94,7 @@ export const apiDeleteUser = (id: string) =>
 
 export interface DayStat   { date: string; count: number; up: number; down: number; }
 export interface UserStat  { username: string; count: number; up: number; down: number; avg_response_s: number; }
-export interface RecentEntry { ts: string; user: string; rating: string; query: string; num_sources: number; total_s: number; }
+export interface RecentEntry { ts: string; user: string; rating: string; query: string; num_sources: number; total_s: number; llm_model: string; }
 export interface StatsData {
   total: number; up: number; down: number;
   avg_db_search_s: number; avg_reranking_s: number; avg_response_s: number; avg_total_s: number;
@@ -116,6 +116,7 @@ export const apiFeedback = (payload: {
   reranking_time?: number;
   response_time?: number;
   num_sources?: number;
+  llm_model?: string;
 }) =>
   apiFetch<{ ok: boolean }>('/api/feedback', {
     method: 'POST',

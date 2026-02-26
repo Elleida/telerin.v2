@@ -119,6 +119,7 @@ export default function ChatPanel({
         reranking_time: msg.result?.reranking_time ?? 0,
         response_time: msg.result?.response_time ?? 0,
         num_sources: msg.result?.sources?.length ?? 0,
+        llm_model: `${settings.llm_backend}/${settings.llm_model}`,
       });
     } catch {
       // silencioso — el log de backend ya captura errores
