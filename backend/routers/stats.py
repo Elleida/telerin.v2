@@ -267,14 +267,14 @@ async def get_queries_log(
         ]
         entries.append(
             QueryLogEntry(
-                timestamp=e.get("timestamp", ""),
-                username=e.get("username", ""),
-                query=e.get("query", ""),
-                response=e.get("response", ""),
+                timestamp=e.get("timestamp") or "",
+                username=e.get("username") or "",
+                query=e.get("query") or "",
+                response=e.get("response") or "",
                 search_time=float(e.get("search_time") or 0),
                 response_time=float(e.get("response_time") or 0),
-                query_type=e.get("query_type", ""),
-                search_classification=e.get("search_classification", ""),
+                query_type=e.get("query_type") or "",
+                search_classification=e.get("search_classification") or "",
                 sql_queries=sql_queries,
             )
         )
