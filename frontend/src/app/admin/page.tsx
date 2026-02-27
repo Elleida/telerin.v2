@@ -217,7 +217,7 @@ function LogRow({ entry, expanded, onToggle }: {
       >
         <span className={`mt-0.5 text-gray-500 transition-transform shrink-0 ${expanded ? 'rotate-90' : ''}`}>▶</span>
         <div className="flex-1 min-w-0">
-          <p className="text-sm text-gray-100 truncate">{entry.query}</p>
+          <p className="text-sm text-gray-100 break-words">{entry.query}</p>
           <p className="text-xs text-gray-500 mt-0.5">
             {formatDate(entry.timestamp)}
             {entry.username && <> · <span className="text-gray-400">{entry.username}</span></>}
