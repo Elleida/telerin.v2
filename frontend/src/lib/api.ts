@@ -121,6 +121,25 @@ export interface StatsData {
 
 export const apiGetStats = () => apiFetch<StatsData>('/api/stats');
 
+// ── Query log ──────────────────────────────────────────────────────────────
+
+export interface QueryLogSqlEntry { table: string; sql: string; }
+export interface QueryLogEntry {
+  timestamp: string;
+  username: string;
+  query: string;
+  response: string;
+  search_time: number;
+  response_time: number;
+  query_type: string;
+  search_classification: string;
+  sql_queries: QueryLogSqlEntry[];
+}
+export interface QueryLogResponse { total: number; entries: QueryLogEntry[]; }
+
+export const apiGetQueryLog = (limit = 50, offset = 0) =>
+  apiFetch<QueryLogResponse>(`/api/stats/queries-log?limit=${limit}&offset=${offset}`);
+
 // ── Models ──────────────────────────────────────────────────────────────────────────────
 export interface ModelInfo { name: string; size: number; }
 export const apiGetModels = () => apiFetch<{ ollama: ModelInfo[] }>('/api/models');

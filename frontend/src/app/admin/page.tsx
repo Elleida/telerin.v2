@@ -6,6 +6,7 @@ import { isAuthenticated, getUserRole } from '@/lib/auth';
 import {
   apiGetUsers, apiCreateUser, apiUpdateUser, apiDeleteUser, UserPublic,
   apiGetStats, StatsData, DayStat,
+  apiGetQueryLog, QueryLogEntry, QueryLogSqlEntry,
 } from '@/lib/api';
 
 const ROLES = ['user', 'admin'];
@@ -175,6 +176,172 @@ function StatsTab() {
           )}
         </div>
       </div>
+    </div>
+  );
+}
+
+// ── Log Tab ────────────────────────────────────────────────────────────────
+const PAGE_SIZE = 50;
+
+function SqlBlock({ entry }: { entry: QueryLogSqlEntry }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="mb-2">
+      <button
+        onClick={() => setOpen(v => !v)}
+        className="flex items-center gap-1.5 text-xs text-blue-400 hover:text-blue-300 font-mono"
+      >
+        <span className={`transition-transform ${open ? 'rotate-90' : ''}`}>▶</span>
+        <span className="text-gray-400">tabla:</span> {entry.table || '—'}
+      </button>
+      {open && (
+        <pre className="mt-1 p-3 bg-gray-950 rounded-lg text-xs text-green-300 overflow-x-auto whitespace-pre-wrap break-all border border-gray-700">
+          {entry.sql.trim()}
+        </pre>
+      )}
+    </div>
+  );
+}
+
+function LogRow({ entry, expanded, onToggle }: {
+  entry: QueryLogEntry;
+  expanded: boolean;
+  onToggle: () => void;
+}) {
+  return (
+    <div className={`border-b border-gray-700 transition-colors ${expanded ? 'bg-gray-800/60' : 'hover:bg-gray-700/30'}`}>
+      {/* summary row */}
+      <button
+        onClick={onToggle}
+        className="w-full px-5 py-3 text-left flex items-start gap-3"
+      >
+        <span className={`mt-0.5 text-gray-500 transition-transform shrink-0 ${expanded ? 'rotate-90' : ''}`}>▶</span>
+        <div className="flex-1 min-w-0">
+          <p className="text-sm text-gray-100 truncate">{entry.query}</p>
+          <p className="text-xs text-gray-500 mt-0.5">
+            {formatDate(entry.timestamp)}
+            {entry.username && <> · <span className="text-gray-400">{entry.username}</span></>}
+            {entry.query_type && <> · <span className="text-blue-500">{entry.query_type}</span></>}
+            {entry.search_classification && <> · <span className="text-yellow-600">{entry.search_classification}</span></>}
+            {entry.response_time > 0 && <> · <span className="text-yellow-400">{entry.response_time.toFixed(1)}s</span></>}
+          </p>
+        </div>
+        {entry.sql_queries.length > 0 && (
+          <span className="shrink-0 px-1.5 py-0.5 text-[10px] rounded bg-gray-700 text-gray-400">
+            {entry.sql_queries.length} SQL
+          </span>
+        )}
+      </button>
+
+      {/* detail panel */}
+      {expanded && (
+        <div className="px-5 pb-5 space-y-4">
+          {/* response */}
+          <div>
+            <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1">Respuesta</p>
+            <pre className="p-3 bg-gray-900 rounded-lg text-xs text-gray-200 overflow-x-auto whitespace-pre-wrap break-words border border-gray-700 max-h-64">
+              {entry.response || '(sin respuesta)'}
+            </pre>
+          </div>
+
+          {/* sql queries */}
+          {entry.sql_queries.length > 0 && (
+            <div>
+              <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Queries SQL</p>
+              {entry.sql_queries.map((sq, i) => <SqlBlock key={i} entry={sq} />)}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function LogTab() {
+  const [data, setData] = useState<{ total: number; entries: QueryLogEntry[] } | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [offset, setOffset] = useState(0);
+  const [expandedIdx, setExpandedIdx] = useState<number | null>(null);
+
+  const load = useCallback(async (off: number) => {
+    setLoading(true); setError('');
+    try {
+      const res = await apiGetQueryLog(PAGE_SIZE, off);
+      setData(res);
+      setOffset(off);
+      setExpandedIdx(null);
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : 'Error cargando el log');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { load(0); }, [load]);
+
+  const totalPages = data ? Math.ceil(data.total / PAGE_SIZE) : 0;
+  const currentPage = Math.floor(offset / PAGE_SIZE) + 1;
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <p className="text-sm text-gray-400">
+          {data ? <>{data.total} consultas en el log</> : null}
+        </p>
+        <button
+          onClick={() => load(offset)}
+          className="px-3 py-1.5 bg-gray-700 hover:bg-gray-600 rounded-lg text-xs font-medium transition-colors"
+        >
+          ↺ Actualizar
+        </button>
+      </div>
+
+      {error && (
+        <div className="p-3 bg-red-900/40 border border-red-700 rounded-lg text-red-300 text-sm">{error}</div>
+      )}
+
+      <div className="bg-gray-800 border border-gray-700 rounded-xl overflow-hidden">
+        {loading ? (
+          <div className="text-center text-gray-400 py-16">Cargando…</div>
+        ) : !data || data.entries.length === 0 ? (
+          <p className="text-center text-gray-500 py-12 text-sm">Sin entradas en el log</p>
+        ) : (
+          <div className="divide-y divide-gray-700">
+            {data.entries.map((entry, i) => (
+              <LogRow
+                key={i}
+                entry={entry}
+                expanded={expandedIdx === i}
+                onToggle={() => setExpandedIdx(expandedIdx === i ? null : i)}
+              />
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* pagination */}
+      {data && totalPages > 1 && (
+        <div className="flex items-center justify-center gap-3">
+          <button
+            disabled={offset === 0}
+            onClick={() => load(Math.max(0, offset - PAGE_SIZE))}
+            className="px-4 py-1.5 bg-gray-700 hover:bg-gray-600 disabled:opacity-40 disabled:cursor-not-allowed rounded-lg text-sm transition-colors"
+          >
+            ← Anterior
+          </button>
+          <span className="text-sm text-gray-400">
+            Página {currentPage} / {totalPages}
+          </span>
+          <button
+            disabled={offset + PAGE_SIZE >= data.total}
+            onClick={() => load(offset + PAGE_SIZE)}
+            className="px-4 py-1.5 bg-gray-700 hover:bg-gray-600 disabled:opacity-40 disabled:cursor-not-allowed rounded-lg text-sm transition-colors"
+          >
+            Siguiente →
+          </button>
+        </div>
+      )}
     </div>
   );
 }
@@ -382,7 +549,7 @@ function UsersTab() {
 // ── Main Page ───────────────────────────────────────────────────────────────
 export default function AdminPage() {
   const router = useRouter();
-  const [tab, setTab] = useState<'users' | 'stats'>('users');
+  const [tab, setTab] = useState<'users' | 'stats' | 'log'>('users');
 
   useEffect(() => {
     if (!isAuthenticated()) { router.replace('/login'); return; }
@@ -392,6 +559,7 @@ export default function AdminPage() {
   const tabs = [
     { id: 'users'  as const, label: '👥 Usuarios' },
     { id: 'stats'  as const, label: '📊 Estadísticas de uso' },
+    { id: 'log'    as const, label: '📋 Registro de consultas' },
   ];
 
   return (
@@ -417,7 +585,7 @@ export default function AdminPage() {
           ))}
         </div>
 
-        {tab === 'users' ? <UsersTab /> : <StatsTab />}
+        {tab === 'users' ? <UsersTab /> : tab === 'stats' ? <StatsTab /> : <LogTab />}
       </div>
     </div>
   );

@@ -1,18 +1,21 @@
 """
-Router de estadísticas: GET /api/stats
-Lee el feedback.log y devuelve métricas de uso agregadas.
+Router de estadísticas: GET /api/stats  y  GET /api/stats/queries-log
+Lee el feedback.log / queries_responses.log y devuelve métricas de uso.
 Solo accesible para administradores.
 """
 from __future__ import annotations
 
 import json
 import os
+import re
 from collections import defaultdict
 from pathlib import Path
+from typing import Optional
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
 
+from backend.config import LOG_FILE as QUERY_LOG_FILE
 from backend.dependencies import get_current_admin
 
 router = APIRouter(prefix="/api/stats", tags=["stats"])
@@ -176,3 +179,104 @@ async def get_stats(_: dict = Depends(get_current_admin)):
         by_user=by_user,
         recent=recent,
     )
+
+
+# ── Queries/Responses log ───────────────────────────────────────────────────
+
+_QUERY_LOG_PATHS = [
+    Path(QUERY_LOG_FILE),
+    Path("queries_responses.log"),
+    Path("/app/queries_responses.log"),
+]
+
+
+def _strip_knn_vector(sql: str) -> str:
+    """Replace the huge float array inside KNN_MATCH with a placeholder."""
+    return re.sub(
+        r"KNN_MATCH\((\w+),\s*\[[\s\S]*?\],\s*(\d+)\)",
+        r"KNN_MATCH(\1, [...], \2)",
+        sql,
+    )
+
+
+def _read_query_log_entries() -> list[dict]:
+    """Read assistant entries from queries_responses.log (NDJSON)."""
+    for path in _QUERY_LOG_PATHS:
+        try:
+            if path.exists():
+                entries = []
+                with path.open("r", encoding="utf-8") as f:
+                    for line in f:
+                        line = line.strip()
+                        if not line:
+                            continue
+                        try:
+                            obj = json.loads(line)
+                            if obj.get("type") == "assistant":
+                                entries.append(obj)
+                        except json.JSONDecodeError:
+                            pass
+                return entries
+        except Exception:
+            pass
+    return []
+
+
+class SqlEntry(BaseModel):
+    table: str = ""
+    sql: str = ""
+
+
+class QueryLogEntry(BaseModel):
+    timestamp: str = ""
+    username: str = ""
+    query: str = ""
+    response: str = ""
+    search_time: float = 0.0
+    response_time: float = 0.0
+    query_type: str = ""
+    search_classification: str = ""
+    sql_queries: list[SqlEntry] = []
+
+
+class QueryLogResponse(BaseModel):
+    total: int
+    entries: list[QueryLogEntry]
+
+
+@router.get("/queries-log", response_model=QueryLogResponse)
+async def get_queries_log(
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+    _: dict = Depends(get_current_admin),
+):
+    raw = _read_query_log_entries()
+    total = len(raw)
+    # newest first
+    raw.reverse()
+    page = raw[offset : offset + limit]
+
+    entries: list[QueryLogEntry] = []
+    for e in page:
+        sql_queries = [
+            SqlEntry(
+                table=sq.get("table", ""),
+                sql=_strip_knn_vector(sq.get("sql", "")),
+            )
+            for sq in e.get("sql_queries", [])
+        ]
+        entries.append(
+            QueryLogEntry(
+                timestamp=e.get("timestamp", ""),
+                username=e.get("username", ""),
+                query=e.get("query", ""),
+                response=e.get("response", ""),
+                search_time=float(e.get("search_time") or 0),
+                response_time=float(e.get("response_time") or 0),
+                query_type=e.get("query_type", ""),
+                search_classification=e.get("search_classification", ""),
+                sql_queries=sql_queries,
+            )
+        )
+
+    return QueryLogResponse(total=total, entries=entries)
