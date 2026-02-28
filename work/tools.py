@@ -362,9 +362,29 @@ def classify_query_tables(query: str) -> List[str]:
         tables_to_search = list(table_definitions.keys())
     
     # ✅ GARANTIZAR: teleradio_content_editorial SIEMPRE está incluida (tabla obligatoria)
+    # EXCEPCIÓN: si la pregunta es específicamente sobre programación de un día concreto
+    # (tiene fecha con día específico + keywords de programación TV/radio),
+    # no es necesario forzar editorial: el usuario sólo quiere la parrilla de ese día.
+    _q_lower = query.lower()
+    _has_specific_day = bool(
+        re.search(r'\b(?:el|día)?\s*\d{1,2}\s+de\s+\w+', _q_lower) or
+        re.search(r'\b\d{1,2}[/-]\d{1,2}[/-]\d{2,4}\b', _q_lower) or
+        re.search(r'\b\d{4}-\d{2}-\d{2}\b', _q_lower)
+    )
+    _schedule_kws = [
+        'programación', 'parrilla', 'emisión', 'horario',
+        'qué había', 'qué hubo', 'qué daban', 'qué echaban', 'qué ponían',
+        'qué emitieron', 'qué emitía', 'canal', 'tve', 'radio nacional',
+        'televisión española', 'tv schedule', 'radio schedule',
+    ]
+    _is_specific_day_schedule = _has_specific_day and any(kw in _q_lower for kw in _schedule_kws)
+
     if "teleradio_content_editorial" not in tables_to_search:
-        tables_to_search.append("teleradio_content_editorial")
-        print(f"   ✅ Tabla content_editorial AÑADIDA (tabla obligatoria en todas las búsquedas)")
+        if _is_specific_day_schedule:
+            print(f"   ℹ️  Tabla content_editorial NO añadida: pregunta sobre programación de día concreto")
+        else:
+            tables_to_search.append("teleradio_content_editorial")
+            print(f"   ✅ Tabla content_editorial AÑADIDA (tabla obligatoria en todas las búsquedas)")
     else:
         print(f"   ✅ Tabla content_editorial YA INCLUIDA")
     
@@ -835,28 +855,44 @@ def _prepare_results_for_llm(search_results: List[Dict]) -> List[Dict]:
 
 
 def _extract_sql_tables(sql_query: str) -> List[str]:
-    """Extrae nombres de tablas desde FROM y JOIN en una consulta SQL."""
+    """Extrae nombres de tablas desde FROM y JOIN en una consulta SQL.
+    
+    Soporta identificadores sin comillas, con comillas y con prefijo de esquema:
+      - teleradio_content_tv_schedule
+      - "teleradio_content_tv_schedule"
+      - doc.teleradio_content_tv_schedule
+      - "doc"."teleradio_content_tv_schedule"
+    """
     if not sql_query:
         return []
 
+    def _clean_identifier(raw: str) -> str:
+        """Toma la última parte (tras el punto) y elimina comillas."""
+        parts = raw.split(".")
+        return parts[-1].strip('"').strip("'")
+
+    # Patrón para un identificador que puede ser:
+    #   - nombre_sin_comillas
+    #   - "nombre_con_comillas"
+    #   - esquema.tabla  (en cualquier combinación de los anteriores)
+    _ident = r'(?:"[^"]+"|[a-zA-Z0-9_]+)(?:\.(?:"[^"]+"|[a-zA-Z0-9_]+))?'
+    _alias = r'[a-zA-Z0-9_]+'  # Los alias rara vez van entrecomillados
+
     tables = []
-    sql_upper = sql_query.upper()
-    
-    # Buscar en FROM
-    from_pattern = r"FROM\s+([a-zA-Z0-9_\.]+)(?:\s+(?:AS\s+)?([a-zA-Z0-9_]+))?(?:\s|,|WHERE|JOIN|INNER|LEFT|RIGHT|ON|$)"
+
+    # Buscar en FROM  (usar comillas simples en el f-string para evitar colisión)
+    from_pattern = rf'FROM\s+({_ident})(?:\s+(?:AS\s+)?{_alias})?(?:\s|,|WHERE|JOIN|INNER|LEFT|RIGHT|ON|$)'
     for match in re.finditer(from_pattern, sql_query, flags=re.IGNORECASE):
-        table_name = match.group(1).split(".")[-1]  # Quitar schema si existe
-        tables.append(table_name)
-    
+        tables.append(_clean_identifier(match.group(1)))
+
     # Buscar en JOIN
-    join_pattern = r"(?:INNER\s+|LEFT\s+|RIGHT\s+|FULL\s+)?JOIN\s+([a-zA-Z0-9_\.]+)(?:\s+(?:AS\s+)?([a-zA-Z0-9_]+))?"
+    join_pattern = rf'(?:INNER\s+|LEFT\s+|RIGHT\s+|FULL\s+)?JOIN\s+({_ident})(?:\s+(?:AS\s+)?{_alias})?'
     for match in re.finditer(join_pattern, sql_query, flags=re.IGNORECASE):
-        table_name = match.group(1).split(".")[-1]  # Quitar schema si existe
-        tables.append(table_name)
-    
-    # Limpiar duplicados e ignorar alias comunes
-    tables = list(dict.fromkeys(tables))  # Mantiene orden sin duplicados
-    
+        tables.append(_clean_identifier(match.group(1)))
+
+    # Limpiar duplicados manteniendo orden
+    tables = list(dict.fromkeys(tables))
+
     return tables
 
 
@@ -1287,6 +1323,30 @@ def hybrid_search(
         print(f"⚠️ Tablas duplicadas detectadas y eliminadas: {len(table_names)} → {len(unique_table_names)}")
     
     table_names = unique_table_names
+
+    # ✅ GARANTIZAR: teleradio_content_editorial SIEMPRE incluida (tabla obligatoria),
+    # incluso cuando el agente LLM haya indicado tablas explícitas.
+    # EXCEPCIÓN: consulta específica de programación para un día concreto.
+    _q_lower_hs = query.lower()
+    _hs_has_day = bool(
+        re.search(r'\b(?:el|día)?\s*\d{1,2}\s+de\s+\w+', _q_lower_hs) or
+        re.search(r'\b\d{1,2}[/-]\d{1,2}[/-]\d{2,4}\b', _q_lower_hs) or
+        re.search(r'\b\d{4}-\d{2}-\d{2}\b', _q_lower_hs)
+    )
+    _hs_sched_kws = [
+        'programación', 'parrilla', 'emisión', 'horario',
+        'qué había', 'qué hubo', 'qué daban', 'qué echaban', 'qué ponían',
+        'qué emitieron', 'qué emitía', 'tv schedule', 'radio schedule',
+    ]
+    _hs_skip_editorial = _hs_has_day and any(kw in _q_lower_hs for kw in _hs_sched_kws)
+
+    if 'teleradio_content_editorial' not in table_names:
+        if _hs_skip_editorial:
+            print(f"   ℹ️  content_editorial omitida: consulta de programación de día concreto")
+        else:
+            table_names.append('teleradio_content_editorial')
+            print(f"   ✅ content_editorial AÑADIDA automáticamente (tabla obligatoria)")
+
     print(f"📋 Tablas a consultar: {', '.join(table_names)}\n")
     
     # Validar que las tablas existan en la configuración
@@ -1589,6 +1649,21 @@ def custom_sql_search(sql_query: str, search_text: str = "") -> str:
     print(f"📝 SQL NORMALIZADO (fechas YYYY-MM-DD):\n{sql_query}\n")
 
     # 🆕 Inicializar search_classification
+
+    # 🔧 CORREGIR credits['cast'/'crew'] ILIKE/LIKE → array_to_string(...) ILIKE/LIKE
+    # CrateDB: credits['cast'] es text_array; ILIKE solo funciona con text.
+    def _fix_credits_array_comparison(q: str) -> str:
+        fixed = re.sub(
+            r"credits\['(\w+)'\]\s*(ILIKE|LIKE|=|!=|<>)",
+            lambda m: f"array_to_string(credits[\'{m.group(1)}\'], ' ') {m.group(2)}",
+            q, flags=re.IGNORECASE
+        )
+        if fixed != q:
+            print("   🔧 credits[] ILIKE corregido → array_to_string() ILIKE")
+        return fixed
+
+    sql_query = _fix_credits_array_comparison(sql_query)
+
     search_classification = "unknown"
 
     # Normalizar SELECT * en UNION para evitar desajustes de columnas
@@ -1976,29 +2051,36 @@ def custom_sql_search(sql_query: str, search_text: str = "") -> str:
             if where_conditions:
                 combined_where = " AND ".join(where_conditions)
                 print(f"\n   ⚙️  Condiciones adicionales a agregar: {combined_where}")
-                
-                if "WHERE" in sql_query.upper():
+
+                # ⚠️ No inyectar condiciones en queries con UNION: cada sub-query ya tiene
+                # sus propios filtros y modificar solo la primera es semánticamente incorrecto
+                if re.search(r"\bUNION\b", sql_query, flags=re.IGNORECASE):
+                    print("   ⚠️  Query con UNION detectada - se omite inyección de condiciones adicionales")
+                    print("   ℹ️  El LLM ya debe haber incluido los filtros necesarios en cada sub-query")
+                elif "WHERE" in sql_query.upper():
                     # Hay WHERE existente - envolver con paréntesis y combinar
                     print("   ⚙️  Query con WHERE detectada - combinando condiciones")
-                    
-                    where_pattern = r"(WHERE\s+)(.*?)(\s+(?:ORDER|GROUP|LIMIT|$)|\Z)"
-                    
+
+                    # UNION incluido en los terminadores para evitar que se trague el segundo SELECT
+                    where_pattern = r"(WHERE\s+)(.*?)(\s+(?:ORDER|GROUP|LIMIT|UNION|$)|\Z)"
+
                     def where_replacer(match):
                         where_keyword = match.group(1)
                         where_condition = match.group(2)
                         rest = match.group(3) if match.group(3) else ""
                         return f"{where_keyword}({where_condition}) AND {combined_where}{rest}"
-                    
+
                     sql_query = re.sub(where_pattern, where_replacer, sql_query, flags=re.IGNORECASE | re.DOTALL)
                 else:
                     # No hay WHERE - crear uno nuevo
                     print("   ⚙️  Sin WHERE detectado - creando WHERE con condiciones")
-                    
-                    if re.search(r"(ORDER|GROUP|LIMIT)", sql_query, flags=re.IGNORECASE):
+
+                    if re.search(r"(ORDER|GROUP|LIMIT|UNION)", sql_query, flags=re.IGNORECASE):
                         sql_query = re.sub(
-                            r"(\s+)(ORDER|GROUP|LIMIT)",
+                            r"(\s+)(ORDER|GROUP|LIMIT|UNION)",
                             f" WHERE {combined_where} \\1\\2",
                             sql_query,
+                            count=1,
                             flags=re.IGNORECASE
                         )
                     else:
@@ -2018,8 +2100,14 @@ def custom_sql_search(sql_query: str, search_text: str = "") -> str:
             "COUNT(", "SUM(", "AVG(", "MIN(", "MAX(", "GROUP BY"
         ])
 
+        has_union = "UNION" in sql_upper_for_score
+
         if has_aggregation:
             print("   ℹ️ Query con agregacion detectada - se omite _score y ORDER BY _score")
+            raise RuntimeError("skip_score_optimization")
+
+        if has_union:
+            print("   ℹ️ Query con UNION detectada - se omite _score (columna de sistema, no válida en UNION)")
             raise RuntimeError("skip_score_optimization")
 
         # 1. Agregar _score al SELECT si no está
@@ -2066,6 +2154,65 @@ def custom_sql_search(sql_query: str, search_text: str = "") -> str:
         print(f"   ⚠️ Error optimizando query: {str(e)}")
         print("   ℹ️ Continuando con query original")
 
+    # 🆕 NORMALIZACIÓN ESPECIAL PARA QUERIES CON UNION:
+    # En SQL estándar (y CrateDB) los sub-SELECTs de un UNION NO pueden tener
+    # su propio ORDER BY ni LIMIT. Solo puede haber uno al final de toda la query.
+    if re.search(r"\bUNION\b", sql_query, flags=re.IGNORECASE):
+        print("🔄 Query UNION detectada - normalizando ORDER BY / LIMIT de sub-queries:")
+
+        # Dividir en sub-queries por UNION ALL / UNION (conservando el separador)
+        union_parts = re.split(r'(\bUNION(?:\s+ALL)?\b)', sql_query, flags=re.IGNORECASE)
+        # union_parts es: [subq1, 'UNION ALL', subq2, 'UNION ALL', subq3, ...]
+
+        _ob_limit_pat = re.compile(
+            r'\s+ORDER\s+BY\s+.+?(?=\s*(?:LIMIT|$))|\s+LIMIT\s+\d+',
+            re.IGNORECASE | re.DOTALL
+        )
+        _ob_full_pat = re.compile(
+            r'\s+ORDER\s+BY\s+(?!.*\bUNION\b).+',
+            re.IGNORECASE | re.DOTALL
+        )
+
+        cleaned_parts = []
+        last_order_by = None
+        for i, part in enumerate(union_parts):
+            upper = part.upper().strip()
+            # Los separadores (UNION / UNION ALL) se copian tal cual
+            if re.match(r'^UNION(?:\s+ALL)?$', upper):
+                cleaned_parts.append(part)
+                continue
+            # Sub-query: extraer ORDER BY (para reutilizarlo al final) y quitarlo
+            ob_match = re.search(
+                r'(\s+ORDER\s+BY\s+(?:(?!LIMIT)[^;])*)(?:\s+LIMIT\s+\d+)?\s*$',
+                part, re.IGNORECASE | re.DOTALL
+            )
+            if ob_match:
+                candidate = ob_match.group(1).strip()
+                if last_order_by is None and '_score' not in candidate.upper():
+                    last_order_by = candidate
+                part = part[:ob_match.start()]
+            part = re.sub(r'\s+LIMIT\s+\d+\s*$', '', part, flags=re.IGNORECASE)
+            cleaned_parts.append(part.rstrip())
+
+        sql_query = ''.join(cleaned_parts)
+        configured_limit_union = get_sql_results_limit()
+        final_order = last_order_by if last_order_by else 'ORDER BY date, time'
+        sql_query = f"{sql_query.rstrip()}\n{final_order}\nLIMIT {configured_limit_union}"
+        print(f"   ✅ Sub-queries limpios. Cláusulas globales: {final_order} LIMIT {configured_limit_union}")
+
+    # 🆕 LIMPIEZA EXTRA PARA QUERIES CON UNION:
+    # _score no es una columna válida en ORDER BY global de un UNION
+    if re.search(r"\bUNION\b", sql_query, flags=re.IGNORECASE):
+        if re.search(r"ORDER\s+BY\s+_score", sql_query, flags=re.IGNORECASE):
+            print("🔄 Query UNION con ORDER BY _score detectado - reemplazando por ORDER BY date DESC")
+            sql_query = re.sub(
+                r"ORDER\s+BY\s+_score(?:\s+(?:ASC|DESC))?",
+                "ORDER BY date DESC",
+                sql_query,
+                flags=re.IGNORECASE
+            )
+            print("   ✅ ORDER BY _score reemplazado por ORDER BY date DESC para UNION")
+
     # 🆕 FORZAR LÍMITE CONFIGURADO
     configured_limit = get_sql_results_limit()
     print(f"📊 FORZANDO LÍMITE CONFIGURADO ({configured_limit} resultados):")
@@ -2084,7 +2231,25 @@ def custom_sql_search(sql_query: str, search_text: str = "") -> str:
                 sql_query = re.sub(limit_pattern, f"LIMIT {configured_limit}", sql_query, flags=re.IGNORECASE)
             else:
                 print(f"   ✅ LIMIT actual: {current_limit} (igual al configurado)")
-    
+
+    # 🆕 NORMALIZAR ORDEN: Asegurar que ORDER BY siempre precede a LIMIT
+    print("📐 NORMALIZANDO ORDEN DE CLÁUSULAS SQL (ORDER BY debe ir antes de LIMIT):")
+    sql_upper_clause = sql_query.upper()
+    limit_idx_clause = sql_upper_clause.rfind("LIMIT")
+    order_by_idx_clause = sql_upper_clause.rfind("ORDER BY")
+    if limit_idx_clause != -1 and order_by_idx_clause != -1 and order_by_idx_clause > limit_idx_clause:
+        # ORDER BY aparece DESPUÉS de LIMIT → hay que corregir el orden
+        print("   ⚠️ ORDER BY detectado DESPUÉS de LIMIT - corrigiendo orden de cláusulas")
+        before_limit = sql_query[:limit_idx_clause].rstrip()
+        limit_match_clause = re.search(r"LIMIT\s+\d+", sql_query[limit_idx_clause:], re.IGNORECASE)
+        order_by_match_clause = re.search(r"ORDER\s+BY\s+[^;]+", sql_query[order_by_idx_clause:], re.IGNORECASE)
+        if limit_match_clause and order_by_match_clause:
+            limit_str_clause = limit_match_clause.group(0).strip()
+            order_by_str_clause = order_by_match_clause.group(0).strip()
+            sql_query = f"{before_limit}\n{order_by_str_clause}\n{limit_str_clause}"
+            print(f"   ✅ Orden corregido → ...{order_by_str_clause} {limit_str_clause}")
+    else:
+        print("   ✅ Orden correcto (ORDER BY antes de LIMIT)")
 
     print(f"📝 SQL FINAL:\n{sql_query}\n")
     
@@ -2093,6 +2258,20 @@ def custom_sql_search(sql_query: str, search_text: str = "") -> str:
     sql_query = normalize_dates_in_sql(sql_query)
     print(f"✅ Fechas normalizadas al formato YYYY-MM-DD\n")
     
+
+    # 🔧 CORREGIR credits['cast'/'crew'] ILIKE → array_to_string() ILIKE (justo antes de ejecutar)
+    def _fix_credits_ilike(q: str) -> str:
+        import re as _re
+        fixed = _re.sub(
+            r"credits\['(\w+)'\]\s*(ILIKE|LIKE|=|!=|<>)",
+            lambda m: f"array_to_string(credits['{m.group(1)}'], ' ') {m.group(2)}",
+            q, flags=_re.IGNORECASE
+        )
+        if fixed != q:
+            print("   🔧 credits[] ILIKE corregido → array_to_string() ILIKE")
+        return fixed
+    sql_query = _fix_credits_ilike(sql_query)
+
     # LOG FINAL COMPLETO
     print("\n" + "="*100)
     print("🎯 🎯 🎯 SQL FINAL QUE SE VA A EJECUTAR EN CRATEDB:")

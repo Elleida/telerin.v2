@@ -384,9 +384,29 @@ def classify_query_tables(query: str) -> List[str]:
         tables_to_search = list(table_definitions.keys())
     
     # ✅ GARANTIZAR: teleradio_content_editorial SIEMPRE está incluida (tabla obligatoria)
+    # EXCEPCIÓN: si la pregunta es específicamente sobre programación de un día concreto
+    # (tiene fecha con día específico + keywords de programación TV/radio),
+    # no es necesario forzar editorial: el usuario sólo quiere la parrilla de ese día.
+    _q_lower = query.lower()
+    _has_specific_day = bool(
+        re.search(r'\b(?:el|día)?\s*\d{1,2}\s+de\s+\w+', _q_lower) or
+        re.search(r'\b\d{1,2}[/-]\d{1,2}[/-]\d{2,4}\b', _q_lower) or
+        re.search(r'\b\d{4}-\d{2}-\d{2}\b', _q_lower)
+    )
+    _schedule_kws = [
+        'programación', 'parrilla', 'emisión', 'horario',
+        'qué había', 'qué hubo', 'qué daban', 'qué echaban', 'qué ponían',
+        'qué emitieron', 'qué emitía', 'canal', 'tve', 'radio nacional',
+        'televisión española', 'tv schedule', 'radio schedule',
+    ]
+    _is_specific_day_schedule = _has_specific_day and any(kw in _q_lower for kw in _schedule_kws)
+
     if "teleradio_content_editorial" not in tables_to_search:
-        tables_to_search.append("teleradio_content_editorial")
-        print(f"   ✅ Tabla content_editorial AÑADIDA (tabla obligatoria en todas las búsquedas)")
+        if _is_specific_day_schedule:
+            print(f"   ℹ️  Tabla content_editorial NO añadida: pregunta sobre programación de día concreto")
+        else:
+            tables_to_search.append("teleradio_content_editorial")
+            print(f"   ✅ Tabla content_editorial AÑADIDA (tabla obligatoria en todas las búsquedas)")
     else:
         print(f"   ✅ Tabla content_editorial YA INCLUIDA")
     
@@ -829,28 +849,44 @@ def _prepare_results_for_llm(search_results: List[Dict]) -> List[Dict]:
 
 
 def _extract_sql_tables(sql_query: str) -> List[str]:
-    """Extrae nombres de tablas desde FROM y JOIN en una consulta SQL."""
+    """Extrae nombres de tablas desde FROM y JOIN en una consulta SQL.
+    
+    Soporta identificadores sin comillas, con comillas y con prefijo de esquema:
+      - teleradio_content_tv_schedule
+      - "teleradio_content_tv_schedule"
+      - doc.teleradio_content_tv_schedule
+      - "doc"."teleradio_content_tv_schedule"
+    """
     if not sql_query:
         return []
 
+    def _clean_identifier(raw: str) -> str:
+        """Toma la última parte (tras el punto) y elimina comillas."""
+        parts = raw.split(".")
+        return parts[-1].strip('"').strip("'")
+
+    # Patrón para un identificador que puede ser:
+    #   - nombre_sin_comillas
+    #   - "nombre_con_comillas"
+    #   - esquema.tabla  (en cualquier combinación de los anteriores)
+    _ident = r'(?:"[^"]+"|[a-zA-Z0-9_]+)(?:\.(?:"[^"]+"|[a-zA-Z0-9_]+))?'
+    _alias = r'[a-zA-Z0-9_]+'  # Los alias rara vez van entrecomillados
+
     tables = []
-    sql_upper = sql_query.upper()
-    
-    # Buscar en FROM
-    from_pattern = r"FROM\s+([a-zA-Z0-9_\.]+)(?:\s+(?:AS\s+)?([a-zA-Z0-9_]+))?(?:\s|,|WHERE|JOIN|INNER|LEFT|RIGHT|ON|$)"
+
+    # Buscar en FROM  (usar comillas simples en el f-string para evitar colisión)
+    from_pattern = rf'FROM\s+({_ident})(?:\s+(?:AS\s+)?{_alias})?(?:\s|,|WHERE|JOIN|INNER|LEFT|RIGHT|ON|$)'
     for match in re.finditer(from_pattern, sql_query, flags=re.IGNORECASE):
-        table_name = match.group(1).split(".")[-1]  # Quitar schema si existe
-        tables.append(table_name)
-    
+        tables.append(_clean_identifier(match.group(1)))
+
     # Buscar en JOIN
-    join_pattern = r"(?:INNER\s+|LEFT\s+|RIGHT\s+|FULL\s+)?JOIN\s+([a-zA-Z0-9_\.]+)(?:\s+(?:AS\s+)?([a-zA-Z0-9_]+))?"
+    join_pattern = rf'(?:INNER\s+|LEFT\s+|RIGHT\s+|FULL\s+)?JOIN\s+({_ident})(?:\s+(?:AS\s+)?{_alias})?'
     for match in re.finditer(join_pattern, sql_query, flags=re.IGNORECASE):
-        table_name = match.group(1).split(".")[-1]  # Quitar schema si existe
-        tables.append(table_name)
-    
-    # Limpiar duplicados e ignorar alias comunes
-    tables = list(dict.fromkeys(tables))  # Mantiene orden sin duplicados
-    
+        tables.append(_clean_identifier(match.group(1)))
+
+    # Limpiar duplicados manteniendo orden
+    tables = list(dict.fromkeys(tables))
+
     return tables
 
 
@@ -1280,7 +1316,31 @@ def hybrid_search(
         print(f"⚠️ Tablas duplicadas detectadas y eliminadas: {len(table_names)} → {len(unique_table_names)}")
     
     table_names = unique_table_names
-    print(f"📋 Tablas a consultar: {', '.join(table_names)}\n")
+
+    # ✅ GARANTIZAR: teleradio_content_editorial SIEMPRE incluida (tabla obligatoria),
+    # incluso cuando el agente LLM haya indicado tablas explícitas.
+    # EXCEPCIÓN: consulta específica de programación para un día concreto.
+    _q_lower_hs = query.lower()
+    _hs_has_day = bool(
+        re.search(r'\b(?:el|día)?\s*\d{1,2}\s+de\s+\w+', _q_lower_hs) or
+        re.search(r'\b\d{1,2}[/-]\d{1,2}[/-]\d{2,4}\b', _q_lower_hs) or
+        re.search(r'\b\d{4}-\d{2}-\d{2}\b', _q_lower_hs)
+    )
+    _hs_sched_kws = [
+        'programación', 'parrilla', 'emisión', 'horario',
+        'qué había', 'qué hubo', 'qué daban', 'qué echaban', 'qué ponían',
+        'qué emitieron', 'qué emitía', 'tv schedule', 'radio schedule',
+    ]
+    _hs_skip_editorial = _hs_has_day and any(kw in _q_lower_hs for kw in _hs_sched_kws)
+
+    if 'teleradio_content_editorial' not in table_names:
+        if _hs_skip_editorial:
+            print(f"   ℹ️  content_editorial omitida: consulta de programación de día concreto")
+        else:
+            table_names.append('teleradio_content_editorial')
+            print(f"   ✅ content_editorial AÑADIDA automáticamente (tabla obligatoria)")
+
+    print(f"💻 Tablas a consultar: {', '.join(table_names)}\n")
     
     # Validar que las tablas existan en la configuración
     valid_tables = SEARCH_CONFIG["tables"].keys()
@@ -1587,6 +1647,21 @@ def custom_sql_search(sql_query: str, search_text: str = "") -> str:
     print(f"📝 SQL NORMALIZADO (fechas YYYY-MM-DD):\n{sql_query}\n")
 
     # 🆕 Inicializar search_classification
+
+    # 🔧 CORREGIR credits['cast'/'crew'] ILIKE/LIKE → array_to_string(...) ILIKE/LIKE
+    # CrateDB: credits['cast'] es text_array; ILIKE solo funciona con text.
+    def _fix_credits_array_comparison(q: str) -> str:
+        fixed = re.sub(
+            r"credits\['(\w+)'\]\s*(ILIKE|LIKE|=|!=|<>)",
+            lambda m: f"array_to_string(credits[\'{m.group(1)}\'], ' ') {m.group(2)}",
+            q, flags=re.IGNORECASE
+        )
+        if fixed != q:
+            print("   🔧 credits[] ILIKE corregido → array_to_string() ILIKE")
+        return fixed
+
+    sql_query = _fix_credits_array_comparison(sql_query)
+
     search_classification = "unknown"
 
     # Normalizar SELECT * en UNION para evitar desajustes de columnas
@@ -1974,29 +2049,36 @@ def custom_sql_search(sql_query: str, search_text: str = "") -> str:
             if where_conditions:
                 combined_where = " AND ".join(where_conditions)
                 print(f"\n   ⚙️  Condiciones adicionales a agregar: {combined_where}")
-                
-                if "WHERE" in sql_query.upper():
+
+                # ⚠️ No inyectar condiciones en queries con UNION: cada sub-query ya tiene
+                # sus propios filtros y modificar solo la primera es semánticamente incorrecto
+                if re.search(r"\bUNION\b", sql_query, flags=re.IGNORECASE):
+                    print("   ⚠️  Query con UNION detectada - se omite inyección de condiciones adicionales")
+                    print("   ℹ️  El LLM ya debe haber incluido los filtros necesarios en cada sub-query")
+                elif "WHERE" in sql_query.upper():
                     # Hay WHERE existente - envolver con paréntesis y combinar
                     print("   ⚙️  Query con WHERE detectada - combinando condiciones")
-                    
-                    where_pattern = r"(WHERE\s+)(.*?)(\s+(?:ORDER|GROUP|LIMIT|$)|\Z)"
-                    
+
+                    # UNION incluido en los terminadores para evitar que se trague el segundo SELECT
+                    where_pattern = r"(WHERE\s+)(.*?)(\s+(?:ORDER|GROUP|LIMIT|UNION|$)|\Z)"
+
                     def where_replacer(match):
                         where_keyword = match.group(1)
                         where_condition = match.group(2)
                         rest = match.group(3) if match.group(3) else ""
                         return f"{where_keyword}({where_condition}) AND {combined_where}{rest}"
-                    
+
                     sql_query = re.sub(where_pattern, where_replacer, sql_query, flags=re.IGNORECASE | re.DOTALL)
                 else:
                     # No hay WHERE - crear uno nuevo
                     print("   ⚙️  Sin WHERE detectado - creando WHERE con condiciones")
-                    
-                    if re.search(r"(ORDER|GROUP|LIMIT)", sql_query, flags=re.IGNORECASE):
+
+                    if re.search(r"(ORDER|GROUP|LIMIT|UNION)", sql_query, flags=re.IGNORECASE):
                         sql_query = re.sub(
-                            r"(\s+)(ORDER|GROUP|LIMIT)",
+                            r"(\s+)(ORDER|GROUP|LIMIT|UNION)",
                             f" WHERE {combined_where} \\1\\2",
                             sql_query,
+                            count=1,
                             flags=re.IGNORECASE
                         )
                     else:
@@ -2016,8 +2098,14 @@ def custom_sql_search(sql_query: str, search_text: str = "") -> str:
             "COUNT(", "SUM(", "AVG(", "MIN(", "MAX(", "GROUP BY"
         ])
 
+        has_union = "UNION" in sql_upper_for_score
+
         if has_aggregation:
             print("   ℹ️ Query con agregacion detectada - se omite _score y ORDER BY _score")
+            raise RuntimeError("skip_score_optimization")
+
+        if has_union:
+            print("   ℹ️ Query con UNION detectada - se omite _score (columna de sistema, no válida en UNION)")
             raise RuntimeError("skip_score_optimization")
 
         # 1. Agregar _score al SELECT si no está
@@ -2064,6 +2152,71 @@ def custom_sql_search(sql_query: str, search_text: str = "") -> str:
         print(f"   ⚠️ Error optimizando query: {str(e)}")
         print("   ℹ️ Continuando con query original")
 
+    # 🆕 NORMALIZACIÓN ESPECIAL PARA QUERIES CON UNION:
+    # En SQL estándar (y CrateDB) los sub-SELECTs de un UNION NO pueden tener
+    # su propio ORDER BY ni LIMIT. Solo puede haber uno al final de toda la query.
+    if re.search(r"\bUNION\b", sql_query, flags=re.IGNORECASE):
+        print("🔄 Query UNION detectada - normalizando ORDER BY / LIMIT de sub-queries:")
+
+        # Dividir en sub-queries por UNION ALL / UNION (conservando el separador)
+        union_parts = re.split(r'(\bUNION(?:\s+ALL)?\b)', sql_query, flags=re.IGNORECASE)
+        # union_parts es: [subq1, 'UNION ALL', subq2, 'UNION ALL', subq3, ...]
+
+        # Extraer ORDER BY y LIMIT del último fragmento (pueden haber sido añadidos allí)
+        # y también eliminar ORDER BY / LIMIT de todos los demás sub-queries
+        _ob_limit_pat = re.compile(
+            r'\s+ORDER\s+BY\s+.+?(?=\s*(?:LIMIT|$))|\s+LIMIT\s+\d+',
+            re.IGNORECASE | re.DOTALL
+        )
+        # Patrón más amplio para quitar ORDER BY + eventual LIMIT juntos
+        _ob_full_pat = re.compile(
+            r'\s+ORDER\s+BY\s+(?!.*\bUNION\b).+',
+            re.IGNORECASE | re.DOTALL
+        )
+
+        cleaned_parts = []
+        last_order_by = None
+        for i, part in enumerate(union_parts):
+            upper = part.upper().strip()
+            # Los separadores (UNION / UNION ALL) se copian tal cual
+            if re.match(r'^UNION(?:\s+ALL)?$', upper):
+                cleaned_parts.append(part)
+                continue
+            # Sub-query: extraer ORDER BY (para reutilizarlo al final) y quitarlo
+            ob_match = re.search(
+                r'(\s+ORDER\s+BY\s+(?:(?!LIMIT)[^;])*)(?:\s+LIMIT\s+\d+)?\s*$',
+                part, re.IGNORECASE | re.DOTALL
+            )
+            if ob_match:
+                candidate = ob_match.group(1).strip()
+                # Solo guardamos si no es _score (inválido en UNION)
+                if last_order_by is None and '_score' not in candidate.upper():
+                    last_order_by = candidate  # ej. "ORDER BY date, time"
+                # Quitar ORDER BY y LIMIT del sub-SELECT
+                part = part[:ob_match.start()]
+            # Quitar también LIMIT suelto que pueda quedar
+            part = re.sub(r'\s+LIMIT\s+\d+\s*$', '', part, flags=re.IGNORECASE)
+            cleaned_parts.append(part.rstrip())
+
+        sql_query = ''.join(cleaned_parts)
+        configured_limit_union = get_sql_results_limit()
+        final_order = last_order_by if last_order_by else 'ORDER BY date, time'
+        sql_query = f"{sql_query.rstrip()}\n{final_order}\nLIMIT {configured_limit_union}"
+        print(f"   ✅ Sub-queries limpios. Cláusulas globales: {final_order} LIMIT {configured_limit_union}")
+
+    # 🆕 LIMPIEZA EXTRA PARA QUERIES CON UNION:
+    # _score no es una columna válida en ORDER BY global de un UNION
+    if re.search(r"\bUNION\b", sql_query, flags=re.IGNORECASE):
+        if re.search(r"ORDER\s+BY\s+_score", sql_query, flags=re.IGNORECASE):
+            print("🔄 Query UNION con ORDER BY _score detectado - reemplazando por ORDER BY date DESC")
+            sql_query = re.sub(
+                r"ORDER\s+BY\s+_score(?:\s+(?:ASC|DESC))?",
+                "ORDER BY date DESC",
+                sql_query,
+                flags=re.IGNORECASE
+            )
+            print("   ✅ ORDER BY _score reemplazado por ORDER BY date DESC para UNION")
+
     # 🆕 FORZAR LÍMITE CONFIGURADO
     configured_limit = get_sql_results_limit()
     print(f"📊 FORZANDO LÍMITE CONFIGURADO ({configured_limit} resultados):")
@@ -2082,7 +2235,25 @@ def custom_sql_search(sql_query: str, search_text: str = "") -> str:
                 sql_query = re.sub(limit_pattern, f"LIMIT {configured_limit}", sql_query, flags=re.IGNORECASE)
             else:
                 print(f"   ✅ LIMIT actual: {current_limit} (igual al configurado)")
-    
+
+    # 🆕 NORMALIZAR ORDEN: Asegurar que ORDER BY siempre precede a LIMIT
+    print("📐 NORMALIZANDO ORDEN DE CLÁUSULAS SQL (ORDER BY debe ir antes de LIMIT):")
+    sql_upper_clause = sql_query.upper()
+    limit_idx_clause = sql_upper_clause.rfind("LIMIT")
+    order_by_idx_clause = sql_upper_clause.rfind("ORDER BY")
+    if limit_idx_clause != -1 and order_by_idx_clause != -1 and order_by_idx_clause > limit_idx_clause:
+        # ORDER BY aparece DESPUÉS de LIMIT → hay que corregir el orden
+        print("   ⚠️ ORDER BY detectado DESPUÉS de LIMIT - corrigiendo orden de cláusulas")
+        before_limit = sql_query[:limit_idx_clause].rstrip()
+        limit_match_clause = re.search(r"LIMIT\s+\d+", sql_query[limit_idx_clause:], re.IGNORECASE)
+        order_by_match_clause = re.search(r"ORDER\s+BY\s+[^;]+", sql_query[order_by_idx_clause:], re.IGNORECASE)
+        if limit_match_clause and order_by_match_clause:
+            limit_str_clause = limit_match_clause.group(0).strip()
+            order_by_str_clause = order_by_match_clause.group(0).strip()
+            sql_query = f"{before_limit}\n{order_by_str_clause}\n{limit_str_clause}"
+            print(f"   ✅ Orden corregido → ...{order_by_str_clause} {limit_str_clause}")
+    else:
+        print("   ✅ Orden correcto (ORDER BY antes de LIMIT)")
 
     print(f"📝 SQL FINAL:\n{sql_query}\n")
     
@@ -2091,6 +2262,20 @@ def custom_sql_search(sql_query: str, search_text: str = "") -> str:
     sql_query = normalize_dates_in_sql(sql_query)
     print(f"✅ Fechas normalizadas al formato YYYY-MM-DD\n")
     
+
+    # 🔧 CORREGIR credits['cast'/'crew'] ILIKE → array_to_string() ILIKE (justo antes de ejecutar)
+    def _fix_credits_ilike(q: str) -> str:
+        import re as _re
+        fixed = _re.sub(
+            r"credits\['(\w+)'\]\s*(ILIKE|LIKE|=|!=|<>)",
+            lambda m: f"array_to_string(credits['{m.group(1)}'], ' ') {m.group(2)}",
+            q, flags=_re.IGNORECASE
+        )
+        if fixed != q:
+            print("   🔧 credits[] ILIKE corregido → array_to_string() ILIKE")
+        return fixed
+    sql_query = _fix_credits_ilike(sql_query)
+
     # LOG FINAL COMPLETO
     print("\n" + "="*100)
     print("🎯 🎯 🎯 SQL FINAL QUE SE VA A EJECUTAR EN CRATEDB:")
@@ -2136,6 +2321,62 @@ def custom_sql_search(sql_query: str, search_text: str = "") -> str:
     # Asegurar que existe un campo 'relevance_score' a partir de posibles '_score' u otros
     for item in formatted_results:
         item['relevance_score'] = item.get('relevance_score', item.get('_score', 0))
+
+    # ✅ BÚSQUEDA COMPLEMENTARIA EN teleradio_content_editorial
+    # Si el LLM no la incluyó en su SQL, la forzamos aquí (igual que hybrid_search).
+    # EXCEPCIÓN: preguntas sobre programación de un día concreto.
+    _css_search_text = (search_text or "").strip().replace("'", "''")  # escape comillas simples
+    _css_q_lower = _css_search_text.lower()
+    _css_has_day = bool(
+        re.search(r'\b(?:el|día)?\s*\d{1,2}\s+de\s+\w+', _css_q_lower) or
+        re.search(r'\b\d{1,2}[/-]\d{1,2}[/-]\d{2,4}\b', _css_q_lower) or
+        re.search(r'\b\d{4}-\d{2}-\d{2}\b', _css_q_lower)
+    )
+    _css_sched_kws = [
+        'programación', 'parrilla', 'emisión', 'horario',
+        'qué había', 'qué hubo', 'qué daban', 'qué echaban', 'qué ponían',
+        'qué emitieron', 'qué emitía', 'tv schedule', 'radio schedule',
+    ]
+    _css_skip_editorial = _css_has_day and any(kw in _css_q_lower for kw in _css_sched_kws)
+
+    if 'teleradio_content_editorial' not in used_tables and not _css_skip_editorial and _css_search_text:
+        print(f"\n📚 BÚSQUEDA COMPLEMENTARIA EN content_editorial (tabla obligatoria no incluida por el LLM):")
+        ed_table_cfg = SEARCH_CONFIG["tables"].get("teleradio_content_editorial", {})
+        ed_search_fields = ed_table_cfg.get("search_fields", ["main_title", "full_text", "brief_summary"])
+        ed_match_conditions = " OR ".join([f"MATCH({f}, '{_css_search_text}')" for f in ed_search_fields])
+        ed_limit = get_sql_results_limit()
+        ed_sql = (
+            f"SELECT magazine_id, page_number, "
+            f"publication_date AS date, main_title AS title, "
+            f"brief_summary AS content_description, "
+            f"'' AS channel, '' AS time, _score "
+            f"FROM teleradio_content_editorial "
+            f"WHERE ({ed_match_conditions}) "
+            f"ORDER BY _score DESC "
+            f"LIMIT {ed_limit}"
+        )
+        print(f"   📝 SQL editorial complementario:\n{ed_sql}")
+        ed_result = execute_cratedb_query(ed_sql)
+        if ed_result:
+            ed_cols = ed_result.get("cols", [])
+            ed_rows = ed_result.get("rows", [])
+            ed_formatted = [dict(zip(ed_cols, row)) for row in ed_rows]
+            for item in ed_formatted:
+                item['relevance_score'] = item.get('_score', 0)
+                item['_source_table'] = 'editorial'
+            print(f"   📈 Filas retornadas de content_editorial: {len(ed_formatted)}")
+            formatted_results.extend(ed_formatted)
+            # Re-ordenar por relevance_score después de combinar
+            formatted_results.sort(key=lambda x: x.get('relevance_score', 0), reverse=True)
+            print(f"   ✅ content_editorial AÑADIDA. Total combinado: {len(formatted_results)} resultados")
+        else:
+            print(f"   ⚠️ No se obtuvieron resultados de content_editorial")
+    elif 'teleradio_content_editorial' in used_tables:
+        print(f"\n   ✅ content_editorial YA INCLUIDA en SQL del LLM — no se duplica búsqueda")
+    elif _css_skip_editorial:
+        print(f"\n   ℹ️  content_editorial omitida: consulta de programación de día concreto")
+    elif not _css_search_text:
+        print(f"\n   ℹ️  content_editorial omitida: sin search_text disponible para MATCH")
 
     # 🆕 Si hay cliente de reranking, aplicarlo y medir tiempo
     reranking_time = 0.0
@@ -2241,9 +2482,9 @@ def _add_png_links_to_response(response_text: str, sources: List[Dict]) -> str:
         #     print(f"      ⚠️ Sin PNG URL para documento {doc_num}")
     
     # Buscar y reemplazar menciones de documentos
-    # Patrón 1: "Documentos X, Y, Z..." (plural con lista de números)
-    # Captura "Documentos" seguido de números separados por comas, "y", o espacios
-    pattern_plural = r'\b([Dd]ocumentos)\s+([\d,\sy\-]+)(?!\s*\[)'
+    # Patrón 1: "Documento/s X, Y, Z..." (singular o plural con lista de números)
+    # Captura "Documento" o "Documentos" seguido de números separados por comas, "y", o espacios
+    pattern_plural = r'\b([Dd]ocumentos?)\s+([\d,\sy\-]+)(?!\s*\[)'
     
     def replacer_plural(match):
         doc_word = match.group(1)  # "documentos" o "Documentos"
@@ -2268,15 +2509,15 @@ def _add_png_links_to_response(response_text: str, sources: List[Dict]) -> str:
                     
                     extra_str = f" {', '.join(extra_info)}" if extra_info else ""
                     
-                    # Agregar enlace sin número de documento
+                    # Agregar número + enlace
                     if i > 0:
                         result_parts.append(",")
-                    result_parts.append(f" [🗄️]({info['url']}){extra_str}")
+                    result_parts.append(f" {num_str} [🗄️]({info['url']}){extra_str}")
                 else:
                     # Número sin enlace (mantener referencia básica)
                     if i > 0:
                         result_parts.append(",")
-                    result_parts.append(f" [doc {num_str}]")
+                    result_parts.append(f" {num_str}")
             
             return "".join(result_parts)
         except Exception as e:
@@ -2310,8 +2551,8 @@ def _add_png_links_to_response(response_text: str, sources: List[Dict]) -> str:
             
             extra_str = f" {', '.join(extra_info)}" if extra_info else ""
             
-            # Reemplazar "documento X" con "documento [enlace]"
-            return f"{doc_word} [🗄️]({info['url']}){extra_str}"
+            # Reemplazar "documento X" con "documento N [enlace]"
+            return f"{doc_word} {doc_num} [🗄️]({info['url']}){extra_str}"
         else:
             return match.group(0)  # Dejar sin cambios si no hay URL
     
@@ -2645,11 +2886,18 @@ DOCUMENTOS:
 PREGUNTA DEL USUARIO: {user_query}
 
 
-ESTRUCTURA OBLIGATORIA DE LA RESPUESTA (en este orden exacto, sin excepciones):
+A MENOS QUE EL USUARIO PIDA UNA ESTRUCTURA DADA EN LA PREGUNTA, POR DEFECTO SIGUE LA SIGUIENTE LÓGICA:
 
-## 1. ESTRUCTURA ÚNICA: ## 
-## Respuesta: ##
-La respuesta debe constar ÚNICAMENTE de una sola sección con la respuesta a la pregunta del usuario. No incluyas secciones de fragmentos, introducciones innecesarias ni conclusiones.
+## 1. ESTRUCTURA  
+
+- Si la pregunta del usuario es de tipo informativa o de consulta general, responde con un texto claro y conciso que resuma la información relevante encontrada en los documentos. Cita los documentos usando el formato (Documento N, Ejemplar, Página , Relevancia: 0.XX) inmediatamente después de cada dato o afirmación que provenga de un documento específico.
+- Si la pregunta del usuario pide explícitamente una lista, tabla, programación o cualquier formato estructurado, responde siguiendo exactamente la estructura solicitada, incluyendo toda la información relevante de los documentos. Cita cada dato usando el formato (Documento N, Ejemplar, Página , Relevancia: 0.XX) inmediatamente después de cada dato.
+- Si la pregunta del usuario es sobre programación de TV o radio, responde con una lista organizada por bloques horarios (mañana, tarde, noche, madrugada) e incluye toda la información relevante de los documentos para cada programa. Cita cada dato usando el formato (Documento N, Ejemplar, Página , Relevancia: 0.XX) inmediatamente después de cada dato.
+- Si la pregunta del usuario es sobre fechas, eventos históricos o cualquier información que pueda ser sensible al tiempo, asegúrate de incluir las fechas y horas exactas que aparecen en los documentos, y cita siempre el documento de origen.
+- Si la pregunta del usuario es sobre personas, personajes o presentadores, incluye los nombres completos y cualquier información relevante encontrada en los documentos, citando siempre la fuente.
+- Si la pregunta del usuario es sobre un tema específico (ej: "¿Qué programas de música se emitieron en julio de 1962?"), asegúrate de incluir toda la información relevante de los documentos relacionada con ese tema, citando cada dato.
+- Si la información en los documentos es contradictoria o hay varias versiones de un mismo hecho, menciona las diferentes versiones y cita los documentos correspondientes para cada una.
+- Si la pregunta del usuario es sobre una comparación entre diferentes programas, fechas, o cualquier otro aspecto, asegúrate de incluir toda la información relevante de los documentos para cada elemento comparado, citando cada dato.
 
 ## 2. REGLAS DE CONTENIDO Y CITAS
 - Responde de forma clara y profesional.
@@ -2871,8 +3119,12 @@ RESPUESTA:"""
                             ],
                         )
                         _usage = getattr(response_obj, 'usage_metadata', None)
+                        print(f"🔢 DEBUG tokens: usage_metadata={_usage}, type={type(_usage)}")
                         if _usage:
-                            _set_token_counts(getattr(_usage, 'prompt_token_count', 0) or 0, getattr(_usage, 'candidates_token_count', 0) or 0)
+                            _pt = getattr(_usage, 'prompt_token_count', 0) or 0
+                            _rt = getattr(_usage, 'candidates_token_count', 0) or 0
+                            print(f"🔢 DEBUG tokens Gemini: prompt={_pt}, response={_rt}")
+                            _set_token_counts(_pt, _rt)
 
                         # Extraer texto de la respuesta en varias posibles estructuras
                         generated_text = None
@@ -3285,7 +3537,10 @@ RESPUESTA:"""
                     if response.status_code == 200:
                         _rdata = response.json()
                         generated_text = _rdata.get("response", "")
-                        _set_token_counts(_rdata.get("prompt_eval_count", 0) or 0, _rdata.get("eval_count", 0) or 0)
+                        _pt = _rdata.get("prompt_eval_count", 0) or 0
+                        _rt = _rdata.get("eval_count", 0) or 0
+                        print(f"🔢 DEBUG tokens Ollama (default): prompt_eval_count={_pt}, eval_count={_rt}, keys={list(_rdata.keys())}")
+                        _set_token_counts(_pt, _rt)
                     else:
                         print(f"❌ Error en respuesta: {response.status_code}")
                         response_time = time.time() - response_start_time

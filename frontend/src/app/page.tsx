@@ -90,7 +90,7 @@ export default function HomePage() {
         <header className="bg-white border-b px-6 py-3 flex items-center gap-4 shrink-0">
           <h1 className="text-2xl font-bold brand-gradient">📺 TELERÍN</h1>
           <p className="text-sm text-gray-400 hidden sm:block">
-            Sistema Multi-Agente · TeleRadio (1958-1965)
+            Memoria de RTVE “Reviviendo el papel de 1958 a 1965”
           </p>
 
           {/* Tabs principales */}

@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Optional
 
 from fastapi import APIRouter, Depends, Query
+from pydantic import BaseModel, field_validator
 from pydantic import BaseModel
 
 from backend.config import LOG_FILE as QUERY_LOG_FILE
@@ -235,8 +236,15 @@ class QueryLogEntry(BaseModel):
     search_time: float = 0.0
     response_time: float = 0.0
     query_type: str = ""
-    search_classification: str = ""
+    search_classification: Optional[str] = ""
     sql_queries: list[SqlEntry] = []
+
+    @field_validator("search_classification", "query_type", "query", "response",
+                     "timestamp", "username", mode="before")
+    @classmethod
+    def _coerce_none_to_str(cls, v):
+        """Coerce None (from old log entries) to empty string."""
+        return v if v is not None else ""
 
 
 class QueryLogResponse(BaseModel):

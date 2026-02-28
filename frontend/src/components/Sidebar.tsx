@@ -44,7 +44,7 @@ export default function Sidebar({ settings, onChange, username, onLogout, onClea
     <aside className="w-72 shrink-0 bg-white border-r flex flex-col h-full overflow-y-auto thin-scrollbar">
       {/* Cabecera */}
       <div className="p-4 border-b">
-        <h2 className="font-bold text-gray-700">⚙️ Sistema Multi-Agente</h2>
+        <h2 className="font-bold text-gray-700">⚙️ TELERÍN ChatBot</h2>
         {username && (
           <p className="text-xs text-gray-400 mt-1">
             👤 {username}{' '}

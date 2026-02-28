@@ -2,8 +2,8 @@ import type { Metadata } from 'next';
 import './globals.css';
 
 export const metadata: Metadata = {
-  title: 'TeleRadio - Multi-Agent Search',
-  description: 'Sistema multi-agente de búsqueda en el archivo histórico de TeleRadio (1958-1965)',
+  title: 'TELERÍN - ChatBot de TeleRadio (1958-1965)',
+  description: 'ChatBot de búsqueda en el archivo histórico de TeleRadio (1958-1965)',
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

@@ -320,7 +320,6 @@ INSTRUCCIONES:
               AND date >= '1962-01-01' AND date < '1963-01-01'
             ORDER BY date, time
             LIMIT 50
-            LIMIT 50
         - Programación de TV y radio los jueves (join para ambos):
             SELECT 'TV' AS tipo, magazine_id, channel AS emisora, date, time, title, day_of_week
             FROM teleradio_content_tv_schedule
@@ -341,7 +340,8 @@ INSTRUCCIONES:
    - "¿qué programación había el 18 de abril de 1962?"     → check_schedule_coverage(year=1962, month=4, day=18)
 5. SIEMPRE usa los nombres exactos de tablas y columnas listados arriba
 6. NO inventes nombres de columnas que no existen
-7. Ejecuta la búsqueda y devuelve los resultados en formato JSON
+7. En queries con UNION/UNION ALL: NUNCA uses _score en el SELECT ni en el ORDER BY (no es válido en UNION). Usa ORDER BY date DESC o date, time como alternativa.
+8. Ejecuta la búsqueda y devuelve los resultados en formato JSON
 
 Pregunta del usuario: {query}
 

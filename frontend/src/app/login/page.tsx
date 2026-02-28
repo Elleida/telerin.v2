@@ -32,9 +32,9 @@ export default function LoginPage() {
       <div className="w-full max-w-md">
         {/* Logo / título */}
         <div className="text-center mb-8">
-          <h1 className="text-5xl font-bold brand-gradient">📺 TELERÍN</h1>
+          <h1 className="text-5xl font-bold brand-gradient">📺 TELERÍN </h1>
           <p className="mt-2 text-gray-500">
-            Sistema Multi-Agente sobre <span className="font-semibold">TeleRadio</span>
+             <span className="font-semibold">TeleRadio</span>
           </p>
           <p className="text-sm text-gray-400">Base de datos histórica (1958-1965)</p>
         </div>

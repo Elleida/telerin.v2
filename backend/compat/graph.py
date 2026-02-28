@@ -310,7 +310,7 @@ def search_node(state: GraphState) -> GraphState:
     # ─────────────────────────────────────────────────────────────────────────
 
     # Crear instrucciones para el agente de búsqueda
-    search_instructions = """Eres TELERÍN 📺, un agente de búsqueda especializado en la base de datos histórica de TeleRadio (1957-1965).
+    search_instructions = """Eres TELERÍN 📺, un agente de búsqueda especializado en la base de datos histórica de TeleRadio (1958-1965).
 Tu única responsabilidad es encontrar información relevante usando las herramientas disponibles.
 
 ⚠️ TABLAS AUTORIZADAS Y SUS COLUMNAS (OBLIGATORIO - USA SOLO ESTOS NOMBRES):
@@ -319,7 +319,7 @@ Tu única responsabilidad es encontrar información relevante usando las herrami
    Columnas disponibles: id, magazine_id, article_id, page_number, section_title, main_title, full_text, brief_summary, media_description, caption_literal
 
 🔸 teleradio_content_tv_schedule:
-   Columnas disponibles: id, magazine_id, channel, block_name, page_number, date, time, title, is_color, sponsor, content_description, media_description, caption_literal, day_of_week
+   Columnas disponibles: id, magazine_id, channel, block_name, page_number, date, time, title, is_color, sponsor, content_description, media_description, caption_literal, day_of_week, credits['cast'], credits['crew']
 
 🔸 teleradio_content_radio_schedule:
    Columnas disponibles: id, magazine_id, station, station_information, page_number, date, time, title, content_description, linked_article_id, day_of_week
@@ -363,7 +363,6 @@ INSTRUCCIONES:
               AND date >= '1962-01-01' AND date < '1963-01-01'
             ORDER BY date, time
             LIMIT 50
-            LIMIT 50
         - Programación de TV y radio los jueves (join para ambos):
             SELECT 'TV' AS tipo, magazine_id, channel AS emisora, date, time, title, day_of_week
             FROM teleradio_content_tv_schedule
@@ -382,9 +381,34 @@ INSTRUCCIONES:
    Ejemplos:
    - "¿hubo algún día sin programación en abril de 1962?"  → check_schedule_coverage(year=1962, month=4, day=0)
    - "¿qué programación había el 18 de abril de 1962?"     → check_schedule_coverage(year=1962, month=4, day=18)
-5. SIEMPRE usa los nombres exactos de tablas y columnas listados arriba
-6. NO inventes nombres de columnas que no existen
-7. Ejecuta la búsqueda y devuelve los resultados en formato JSON
+5. Para preguntas sobre fechas o periodos específicos, SIEMPRE incluye filtros de fecha en la consulta (date >= 'YYYY-MM-DD' AND date < 'YYYY-MM-DD') para acotar los resultados al periodo mencionado.
+   Ejemplos:
+   - "¿qué programas de TV había en enero de 1960?" → date >= '1960-01-01' AND date < '1960-02-01'
+   - "¿qué anuncios de Coca-Cola había en 1963?" → date >= '1963-01-01' AND date < '1964-01-01'
+6. Para preguntas que impliquen buscar nombres de programas incluir en la busqueda en las tablas de programación (teleradio_content_tv_schedule y teleradio_content_radio_schedule) usando filtros sobre la columna title o content_description, dependiendo de la pregunta.
+   Ejemplos:
+   - "¿en qué programas de TV apareció el actor X?" → filtro sobre title y/o content_description en teleradio_content_tv_schedule
+   - "¿qué programas de radio mencionaban la palabra 'fútbol'?" → filtro sobre title y/o content_description en teleradio_content_radio_schedule
+   - Dame un listado de programas realizados por mujeres en 1961 → date >= '1961-01-01' AND date < '1962-01-01' en teleradio_content_tv_schedule y/o teleradio_content_radio_schedule + filtro sobre content_description con palabras clave relacionadas con mujeres (ej. "realizado por mujeres", "realizadora", etc.) + filtro sobre credits['crew'] con palabras clave relacionadas con mujeres (ej. "directora", "guionista", "productora", etc.) y credits['cast'] con realizadoras (ej. "realizadora", etc.)
+   Un ejemplo de query SQL para el último caso podría ser:
+    SELECT magazine_id, channel, date, time, title, content_description, credits['crew'] as crew, credits['cast'] as "cast"
+    FROM teleradio_content_tv_schedule
+    WHERE (array_to_string(credits['cast'], ' ') ILIKE '%realizadora%'
+    OR array_to_string(credits['crew'], ' ') ILIKE '%realizadora%'
+    OR array_to_string(credits['crew'], ' ') ILIKE '%directora%')
+    AND date >= '1964-01-01' AND date < '1965-01-01'
+    ORDER BY date, time
+    LIMIT 100
+7. SIEMPRE usa los nombres exactos de tablas y columnas listados arriba
+8. NO inventes nombres de columnas que no existen
+9. En queries con UNION/UNION ALL: NUNCA uses _score en el SELECT ni en el ORDER BY (no es válido en UNION). Usa ORDER BY date DESC o date, time como alternativa.
+10. A menos que se pregunte por una programación concreta de un día de la semana, incluye SIEMPRE en la búsqueda, ES IMPERATIVO, la tabla teleradio_content_editorial para capturar posibles menciones en los artículos, resúmenes o secciones de la revista.
+11. Ejecuta la búsqueda y devuelve los resultados en formato JSON
+
+⚠️ REGLA CRÍTICA - OBLIGATORIA:
+El parámetro `query` que pases a hybrid_search o custom_sql_search DEBE derivarse Única y exclusivamente de la pregunta del usuario que se indica abajo.
+Está PROHIBIDO usar términos que hayas visto en otras búsquedas anteriores, en tu conocimiento interno o en cualquier otro contexto que no sea la pregunta actual.
+Si la pregunta es "cuál fue la serie más vista en 1964", la query de búsqueda debe ser algo como "serie telefilm más visto televisión 1964", NUNCA el nombre de un programa concreto que no aparezca en la pregunta.
 
 Pregunta del usuario: {query}
 
@@ -417,6 +441,32 @@ Ejecuta la búsqueda apropiada ahora."""
     try:
         response = search_agent.invoke(agent_messages)
         if hasattr(response, 'tool_calls') and response.tool_calls:
+
+            # ⚠️ GUARDIA: si el agente LLM generó una query de hybrid_search con términos
+            # que NO provienen de la actual_query (posible contaminación de contexto
+            # previo / hallucination), la reemplazamos por actual_query.
+            def _query_is_alien(agent_q: str, user_q: str) -> bool:
+                """True si ninguna palabra significativa de agent_q aparece en user_q."""
+                stop = {'de', 'la', 'el', 'en', 'y', 'a', 'los', 'las', 'un', 'una',
+                        'que', 'es', 'se', 'por', 'con', 'del', 'al', 'su', 'fue',
+                        'o', 'e', 'u', 'no', 'le', 'lo'}
+                user_words = {w.lower().strip('¿?.,;:') for w in user_q.split() if len(w) > 2 and w.lower() not in stop}
+                agent_words = {w.lower().strip('¿?.,;:\'"') for w in agent_q.split() if len(w) > 2 and w.lower() not in stop}
+                if not agent_words:
+                    return False
+                overlap = user_words & agent_words
+                # Si menos del 15% de las palabras del agente coinciden con la query del usuario → alien
+                return len(overlap) / len(agent_words) < 0.15
+
+            for tc in response.tool_calls:
+                if tc.get('name') == 'hybrid_search':
+                    agent_q = tc.get('args', {}).get('query', '')
+                    if agent_q and _query_is_alien(agent_q, actual_query):
+                        print(f"   ⚠️  GUARDIA: query del agente parece hallucination/contexto alien:")
+                        print(f"      Original agente : '{agent_q}'")
+                        print(f"      Reemplazada por : '{actual_query}'")
+                        tc['args']['query'] = actual_query
+
             unique_tool_calls = []
             seen_calls = set()
             for tool_call in response.tool_calls:
@@ -561,6 +611,10 @@ def response_node(state: GraphState) -> GraphState:
     print("🟢" * 40)
 
     user_query = state.get("user_query", "")
+    enhanced_query = state.get("enhanced_query")
+    # Usar la query enriquecida para generación si existe, ya que tiene el contexto
+    # conversacional necesario para que el LLM responda correctamente
+    effective_query = enhanced_query if enhanced_query else user_query
     search_results = state.get("search_results", [])
     error = state.get("error", "")
     query_type = state.get("query_type", "data_search")
@@ -571,7 +625,7 @@ def response_node(state: GraphState) -> GraphState:
         if conversation_memory is not None and CONVERSATION_MEMORY_CONFIG.get("entity_extraction", True):
             try:
                 conversation_memory.add_turn(
-                    user_query=user_query,
+                    user_query=user_query,  # siempre guardar la query original en memoria
                     response=greeting,
                     query_type="greeting",
                     enhanced_query=state.get("enhanced_query"),
@@ -606,7 +660,7 @@ No des información técnica sobre la arquitectura interna (por ejemplo: "cómo 
 Evita respuestas largas; usa viñetas cuando sea posible y ofrece una última línea con una sugerencia de siguiente paso (por ejemplo: Prueba: "Busca anuncios de Coca-Cola").
 """
             gen = generate_response_internal(
-                user_query=user_query,
+                user_query=effective_query,
                 search_results=[],
                 additional_context=help_context,
                 llm_backend=state.get('llm_backend', 'ollama'),
@@ -636,7 +690,7 @@ Evita respuestas largas; usa viñetas cuando sea posible y ofrece una última l�
         except Exception:
             pass
         gen = generate_response_internal(
-            user_query=user_query,
+            user_query=effective_query,
             search_results=search_results,
             additional_context="",
             llm_backend=state.get('llm_backend', 'ollama'),
@@ -654,7 +708,7 @@ Evita respuestas largas; usa viñetas cuando sea posible y ofrece una última l�
                     _entity_summary = ", ".join(f"{k}: {v}" for k, v in _entities.items() if v)
                     print(f"🏷️ Entidades extraídas: {_entity_summary}")
                 conversation_memory.add_turn(
-                    user_query=user_query,
+                    user_query=user_query,  # siempre guardar la query original en memoria
                     response=_resp_text,
                     query_type="data_search",
                     enhanced_query=state.get("enhanced_query"),
