@@ -208,6 +208,30 @@ Si `DISABLE_STREAMING=1` (por defecto en la configuración actual), el LLM gener
 
 ---
 
+## Paso 8.5 — Post-procesado: sustitución de referencias por enlaces PNG
+
+**Fichero:** `backend/compat/tools.py` → `_add_png_links_to_response()`
+
+Tras generar la respuesta, el LLM suele citar las fuentes con expresiones del tipo «Documento 1», «Documento 3, 5» o «Documentos 2, 7, 9». Esta función localiza esas referencias y las convierte en enlaces Markdown clicables que apuntan a la imagen PNG del número de revista correspondiente.
+
+**Patrones reconocidos:**
+
+| Patrón LLM | Resultado renderizado |
+|---|---|
+| `Documento 1` | `Documento 1 [🗄️](url) Revista#211, 1962-01-08` |
+| `Documento 1, 2, 7` | `Documento 1 [🗄️](url) Revista#211, 1962-01-08, 2 [🗄️](url) ..., 7` |
+| `Documentos 3, 5` | `Documentos 3 [🗄️](url) Revista#394, 1965-07-12, 5 [🗄️](url) ...` |
+
+**Lógica:**
+1. Se construye un mapa `doc_num → {url, magazine_id, date}` a partir de las fuentes (`sources`) devueltas por la búsqueda.
+2. El patrón plural (`[Dd]ocumentos?` seguido de una lista de números) procesa **todos** los números del grupo: los que tienen URL reciben enlace + número; los que no tienen URL mantienen solo el número.
+3. El patrón singular (`[Dd]ocumento \d+`) actúa como fallback para referencias individuales que no hayan sido cubiertas por el patrón plural.
+4. El número del documento **siempre** se preserva en la salida junto al enlace.
+
+> Si una referencia en la respuesta no tiene URL asociada (documento sin imagen PNG indexada), el número se mantiene en texto plano sin enlace.
+
+---
+
 ## Paso 9 — Envío de la respuesta y metadatos
 
 **Fichero:** `backend/routers/chat.py`

@@ -176,6 +176,12 @@ Query
 
 `tools.py` captura `prompt_tokens` y `response_tokens` en cada llamada LLM (Ollama y Gemini, streaming y no-streaming) a través de `_set_token_counts()`. El `response_node` los extrae y los propaga al `GraphState`, desde donde llegan al mensaje WebSocket `final` y al `feedback.log`.
 
+#### `_add_png_links_to_response(response_text, sources)`
+
+Post-procesa la respuesta generada por el LLM sustituyendo las referencias textuales a documentos (`Documento N`, `Documento 1, 2, 3`, `Documentos N, M`) por enlaces Markdown que apuntan a la imagen PNG del número de revista correspondiente. El número del documento se conserva siempre junto al enlace. Las referencias sin URL asociada se mantienen como texto plano.
+
+---
+
 #### `call_llm_prompt(prompt, backend, model)`
 
 Abstracción unificada para llamar al LLM activo:
