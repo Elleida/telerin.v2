@@ -107,20 +107,22 @@ def call_llm_prompt(prompt: str, backend: str = "ollama", model: str | None = No
 
     raise Exception(f"Backend LLM desconocido: {backend}")
 
-# Variable global para almacenar el último prompt generado
-LAST_GENERATED_PROMPT = None
-LAST_TOKEN_COUNTS: dict = {"prompt_tokens": 0, "response_tokens": 0}  # Conteo de tokens de la última llamada LLM
-LAST_USER_QUERY = None
-LAST_SEARCH_RESULTS = None
-LAST_EXECUTED_SQL_QUERIES = []  # Nueva variable para guardar todas las queries SQL ejecutadas
+# ---------------------------------------------------------------------------
+# Estado por-hilo (thread-local) — seguro para múltiples usuarios simultáneos
+# ---------------------------------------------------------------------------
+# Cada hilo de ejecución (uno por query de usuario) tiene su propia copia de
+# estas variables, por lo que no puede haber interferencia entre usuarios.
+# Se usa threading.local() en lugar de variables globales simples.
+import threading as _threading
+_tl = _threading.local()
 
-# Caché para clasificación de búsquedas genéricas/específicas
+def _tl_get(attr, default):
+    """Devuelve el atributo del almacenamiento local del hilo, o el default si no existe."""
+    return getattr(_tl, attr, default)
+
+# Caché para clasificación de búsquedas genéricas/específicas (sí puede ser global
+# porque su contenido no depende del usuario: misma query → mismo resultado)
 _GENERIC_SEARCH_CACHE = {}  # {search_query: bool}
-SQL_RESULTS_LIMIT = 60
-LLM_SCORE_THRESHOLD = 0.5
-_CHAT_HISTORY = []  # Turns recientes inyectados desde el router
-_CURRENT_LLM_BACKEND = "ollama"   # Backend activo (actualizado por graph.py)
-_CURRENT_LLM_MODEL: str | None = None  # Modelo activo
 
 
 def _clamp_limit(limit_value: int, min_value: int = 1, max_value: int = 200) -> int:
@@ -137,14 +139,13 @@ def _clamp_limit(limit_value: int, min_value: int = 1, max_value: int = 200) -> 
 
 
 def set_sql_results_limit(limit_value: int):
-    """Guarda el límite de resultados para consultas SQL."""
-    global SQL_RESULTS_LIMIT
-    SQL_RESULTS_LIMIT = _clamp_limit(limit_value, min_value=1, max_value=200)
+    """Guarda el límite de resultados para consultas SQL (por hilo)."""
+    _tl.sql_results_limit = _clamp_limit(limit_value, min_value=1, max_value=200)
 
 
 def get_sql_results_limit() -> int:
-    """Obtiene el límite de resultados para consultas SQL."""
-    return SQL_RESULTS_LIMIT
+    """Obtiene el límite de resultados para consultas SQL (por hilo)."""
+    return _tl_get('sql_results_limit', 60)
 
 
 def _clamp_threshold(value: float, min_value: float = 0.0, max_value: float = 1.0) -> float:
@@ -161,37 +162,34 @@ def _clamp_threshold(value: float, min_value: float = 0.0, max_value: float = 1.
 
 
 def set_llm_score_threshold(threshold_value: float):
-    """Guarda el umbral (0.0 - 1.0) de score para enviar documentos al LLM."""
-    global LLM_SCORE_THRESHOLD
-    LLM_SCORE_THRESHOLD = _clamp_threshold(threshold_value, min_value=0.0, max_value=1.0)
+    """Guarda el umbral (0.0 - 1.0) de score para enviar documentos al LLM (por hilo)."""
+    _tl.llm_score_threshold = _clamp_threshold(threshold_value, min_value=0.0, max_value=1.0)
 
 
 def get_llm_score_threshold() -> float:
-    """Obtiene el umbral de score para enviar documentos al LLM."""
-    return LLM_SCORE_THRESHOLD
+    """Obtiene el umbral de score para enviar documentos al LLM (por hilo)."""
+    return _tl_get('llm_score_threshold', 0.5)
 
 
 def set_chat_history(turns: list):
-    """Inyecta el historial de conversación reciente para usarlo en los prompts."""
-    global _CHAT_HISTORY
-    _CHAT_HISTORY = list(turns) if turns else []
+    """Inyecta el historial de conversación reciente para usarlo en los prompts (por hilo)."""
+    _tl.chat_history = list(turns) if turns else []
 
 
 def get_chat_history() -> list:
-    """Obtiene el historial de conversación inyectado."""
-    return _CHAT_HISTORY
+    """Obtiene el historial de conversación inyectado (por hilo)."""
+    return _tl_get('chat_history', [])
 
 
 def set_active_llm_backend(backend: str, model: str | None = None):
-    """Actualiza el backend LLM activo para todas las llamadas internas (clasificación, etc.)."""
-    global _CURRENT_LLM_BACKEND, _CURRENT_LLM_MODEL
-    _CURRENT_LLM_BACKEND = (backend or "ollama").lower()
-    _CURRENT_LLM_MODEL = model or None
+    """Actualiza el backend LLM activo para las llamadas internas del hilo actual."""
+    _tl.llm_backend = (backend or "ollama").lower()
+    _tl.llm_model = model or None
 
 
 def get_active_llm_backend() -> tuple[str, str | None]:
-    """Devuelve (backend, model) activos."""
-    return _CURRENT_LLM_BACKEND, _CURRENT_LLM_MODEL
+    """Devuelve (backend, model) activos para el hilo actual."""
+    return _tl_get('llm_backend', 'ollama'), _tl_get('llm_model', None)
 
 
 def clear_generic_search_cache():
@@ -203,61 +201,55 @@ def clear_generic_search_cache():
 
 
 def set_last_prompt(prompt_text):
-    """Guarda el último prompt generado"""
-    global LAST_GENERATED_PROMPT
-    LAST_GENERATED_PROMPT = prompt_text
+    """Guarda el último prompt generado (por hilo)."""
+    _tl.last_generated_prompt = prompt_text
 
 
 def get_last_token_counts() -> dict:
-    """Devuelve {prompt_tokens, response_tokens} de la última llamada LLM."""
-    return LAST_TOKEN_COUNTS.copy()
+    """Devuelve {prompt_tokens, response_tokens} de la última llamada LLM (por hilo)."""
+    return dict(_tl_get('token_counts', {"prompt_tokens": 0, "response_tokens": 0}))
 
 
 def _set_token_counts(prompt_tokens: int, response_tokens: int):
-    """Actualiza el conteo de tokens de la última llamada LLM."""
-    global LAST_TOKEN_COUNTS
-    LAST_TOKEN_COUNTS = {"prompt_tokens": prompt_tokens, "response_tokens": response_tokens}
+    """Actualiza el conteo de tokens de la última llamada LLM (por hilo)."""
+    _tl.token_counts = {"prompt_tokens": prompt_tokens, "response_tokens": response_tokens}
 
 
 def get_last_executed_sql_queries():
-    """Obtiene todas las queries SQL ejecutadas en la última búsqueda"""
-    global LAST_EXECUTED_SQL_QUERIES
-    queries = LAST_EXECUTED_SQL_QUERIES.copy() if LAST_EXECUTED_SQL_QUERIES else []
+    """Obtiene todas las queries SQL ejecutadas en la última búsqueda (por hilo)."""
+    queries = list(_tl_get('executed_sql_queries', []))
     print(f"   🔍 get_last_executed_sql_queries() retornando {len(queries)} queries")
     return queries
 
 
 def set_last_executed_sql_queries(queries: List[Dict]):
-    """Guarda todas las queries SQL ejecutadas"""
-    global LAST_EXECUTED_SQL_QUERIES
-    LAST_EXECUTED_SQL_QUERIES = queries if queries else []
-    print(f"   💾 set_last_executed_sql_queries() guardado {len(LAST_EXECUTED_SQL_QUERIES)} queries")
+    """Guarda todas las queries SQL ejecutadas (por hilo)."""
+    _tl.executed_sql_queries = list(queries) if queries else []
+    print(f"   💾 set_last_executed_sql_queries() guardado {len(_tl.executed_sql_queries)} queries")
 
 
 def add_executed_sql_query(table: str, sql: str):
-    """Agrega una query SQL ejecutada a la lista global"""
-    global LAST_EXECUTED_SQL_QUERIES
-    LAST_EXECUTED_SQL_QUERIES.append({"table": table, "sql": sql})
-    print(f"   ➕ add_executed_sql_query() - Tabla: {table}, Total queries: {len(LAST_EXECUTED_SQL_QUERIES)}")
+    """Agrega una query SQL ejecutada a la lista del hilo actual."""
+    if not hasattr(_tl, 'executed_sql_queries'):
+        _tl.executed_sql_queries = []
+    _tl.executed_sql_queries.append({"table": table, "sql": sql})
+    print(f"   ➕ add_executed_sql_query() - Tabla: {table}, Total queries: {len(_tl.executed_sql_queries)}")
 
 
 def clear_executed_sql_queries():
-    """Limpia la lista de queries SQL ejecutadas"""
-    global LAST_EXECUTED_SQL_QUERIES
-    LAST_EXECUTED_SQL_QUERIES = []
+    """Limpia la lista de queries SQL ejecutadas del hilo actual."""
+    _tl.executed_sql_queries = []
 
 
 def set_last_search_context(query: str, results: List[Dict]):
-    """Guarda la query y resultados de búsqueda para construir prompts después"""
-    global LAST_USER_QUERY, LAST_SEARCH_RESULTS
-    LAST_USER_QUERY = query
-    LAST_SEARCH_RESULTS = results if results else []
+    """Guarda la query y resultados de búsqueda para construir prompts después (por hilo)."""
+    _tl.last_user_query = query
+    _tl.last_search_results = list(results) if results else []
 
 
 def get_last_search_context():
-    """Obtiene la query y resultados de búsqueda guardados"""
-    global LAST_USER_QUERY, LAST_SEARCH_RESULTS
-    return LAST_USER_QUERY, LAST_SEARCH_RESULTS
+    """Obtiene la query y resultados de búsqueda guardados (por hilo)."""
+    return _tl_get('last_user_query', None), _tl_get('last_search_results', [])
 
 
 def classify_query_intent(query: str) -> str:

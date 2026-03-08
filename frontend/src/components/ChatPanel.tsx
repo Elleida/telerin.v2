@@ -71,6 +71,9 @@ const [feedbackGiven, setFeedbackGiven] = useState<Record<string, 'up' | 'down'>
   useEffect(() => {
     if (clearKey === undefined || clearKey === 0) return;
     setMessages([{ id: 'greeting', role: 'assistant', content: GREETING }]);
+    setFeedbackGiven({});
+    setPendingCommentId(null);
+    setCommentText('');
     clearConv();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [clearKey]);
@@ -93,12 +96,18 @@ const [feedbackGiven, setFeedbackGiven] = useState<Record<string, 'up' | 'down'>
   };
 
   const handleClear = () => {
-    clearConv();
     setMessages([{ id: 'greeting', role: 'assistant', content: GREETING }]);
     setFeedbackGiven({});
     setPendingCommentId(null);
     setCommentText('');
-    onClear?.();
+    if (onClear) {
+      // onClear dispara handleClearConv en page.tsx → setClearKey(k+1)
+      // → useEffect de clearKey → clearConv() (un solo mensaje WS clear)
+      onClear();
+    } else {
+      // Sin padre que gestione clearKey, limpiamos directamente
+      clearConv();
+    }
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {

@@ -154,16 +154,19 @@ async def ws_chat(websocket: WebSocket):
                 except Exception:
                     pass
 
-            def _bg():
+            def _bg(mem=memory):
                 try:
-                    # Inyectar historial conversacional (thread-local) para que
-                    # generate_response_internal pueda incluirlo en el prompt.
-                    recent_turns = memory.get_recent_turns(5) if memory else []
+                    # Capturamos `mem` como argumento por defecto para que este hilo
+                    # use siempre el objeto ConversationMemory de ESTA query, sin
+                    # verse afectado si el usuario pulsa "Limpiar" mientras se ejecuta
+                    # (lo que reasignaría `memory` en el scope exterior y, en el viejo
+                    # código, provocaba que el hilo viera un objeto ya vaciado o nuevo).
+                    recent_turns = mem.get_recent_turns(5) if mem else []
                     set_chat_history(recent_turns)
 
                     res = run_graph(
                         query_with_context,
-                        memory,
+                        mem,
                         llm_backend=llm_backend,
                         llm_model=llm_model,
                         stream=True,

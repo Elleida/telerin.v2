@@ -30,10 +30,15 @@ def get_session(session_id: str) -> ConversationMemory:
 
 
 def clear_session(session_id: str) -> None:
-    """Limpia la memoria de una sesión."""
+    """Elimina la sesión existente para que get_session cree un objeto nuevo y limpio.
+    
+    Se elimina (en lugar de llamar a .clear() sobre el mismo objeto) para evitar la
+    race condition en la que un hilo de background de la query anterior todavía tiene
+    referencia al mismo objeto ConversationMemory y le puede añadir turnos viejos
+    después del borrado.
+    """
     with _lock:
-        if session_id in _sessions:
-            _sessions[session_id].clear()
+        _sessions.pop(session_id, None)
 
 
 def delete_session(session_id: str) -> None:
