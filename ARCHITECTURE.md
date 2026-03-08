@@ -138,6 +138,31 @@ END → WebSocket stream al cliente (con tokens en mensaje 'final')
 
 ### 3. Herramientas de búsqueda (`backend/compat/tools.py`)
 
+#### Estado por hilo (`threading.local`)
+
+Todo el estado mutable que varía por query (límites, umbrales, historial de chat, backend LLM activo, resultados de búsqueda, tokens, queries SQL ejecutadas) se almacena en un objeto `threading.local()` en lugar de variables globales de módulo:
+
+```python
+_tl = threading.local()
+```
+
+Esto garantiza que dos usuarios simultáneos nunca interfieran entre sí:
+
+| Variable (antes global) | Atributo en `_tl` | Valor por defecto |
+|---|---|---|
+| `SQL_RESULTS_LIMIT` | `_tl.sql_results_limit` | `60` |
+| `LLM_SCORE_THRESHOLD` | `_tl.llm_score_threshold` | `0.5` |
+| `_CHAT_HISTORY` | `_tl.chat_history` | `[]` |
+| `_CURRENT_LLM_BACKEND/MODEL` | `_tl.llm_backend`, `_tl.llm_model` | `"ollama"`, `None` |
+| `LAST_GENERATED_PROMPT` | `_tl.last_generated_prompt` | `None` |
+| `LAST_TOKEN_COUNTS` | `_tl.token_counts` | `{prompt: 0, response: 0}` |
+| `LAST_EXECUTED_SQL_QUERIES` | `_tl.executed_sql_queries` | `[]` |
+| `LAST_USER_QUERY/RESULTS` | `_tl.last_user_query`, `_tl.last_search_results` | `None`, `[]` |
+
+La única variable que permanece global es `_GENERIC_SEARCH_CACHE` (caché de clasificación de intención), cuyo contenido no depende del usuario.
+
+---
+
 #### `hybrid_search(query, table, limit)`
 
 Combina dos tipos de búsqueda sobre CrateDB:
@@ -225,6 +250,25 @@ ConversationMemory
   ├── context_window: 5                 # turnos activos para análisis
   └── entities: {years, channels, programs, topics, ...}
 ```
+
+**Gestión de sesiones (`backend/services/session_store.py`):**
+
+Cada usuario autenticado tiene su propio objeto `ConversationMemory`, indexado por `user_id` (UUID) y protegido por un `threading.Lock`:
+
+```python
+_sessions: Dict[str, ConversationMemory] = {}
+_lock = Lock()
+```
+
+`clear_session()` elimina la entrada del diccionario (`pop`) en lugar de vaciar el objeto en sitio. Esto evita la siguiente race condition:
+
+```
+# Race condition evitada:
+Hilo A (query anterior): todavía ejecutando → add_turn() al objeto antiguo ← huérfano, descartado
+Hilo B (nueva query)   : get_session() → crea ConversationMemory nuevo y limpio ✅
+```
+
+Si `clear_session` llamara a `.clear()` sobre el mismo objeto, el hilo A podría reinyectar turnos viejos después del borrado.
 
 ---
 
@@ -415,6 +459,30 @@ Browser: GET /teleradio/images/... → Next.js rewrite → GET http://localhost:
 11. /api/feedback guarda entrada en feedback.log con comment
 12. Admin panel → /api/stats → muestra comentario en rojo bajo la consulta
 ```
+
+---
+
+## Concurrencia multiusuario
+
+```
+Usuario A (uuid-A)                     Usuario B (uuid-B)
+       │                                       │
+  WebSocket coroutine A              WebSocket coroutine B
+       │                                       │
+  session_store["uuid-A"]           session_store["uuid-B"]
+  ConversationMemory_A              ConversationMemory_B
+          │                                    │
+  Hilo _bg(mem=Memory_A)            Hilo _bg(mem=Memory_B)
+  threading.local()_A               threading.local()_B
+  (sql_limit, threshold,            (sql_limit, threshold,
+   chat_history, tokens, …)          chat_history, tokens, …)
+```
+
+Garantías:
+- **Memoria conversacional**: objeto `ConversationMemory` distinto por `user_id`
+- **Parámetros de query**: `threading.local()` en `tools.py` — cada hilo tiene su copia privada
+- **Captura de memoria en hilo**: `def _bg(mem=memory)` — argumento por defecto fija el objeto en el momento de creación, independientemente de los `clear` posteriores
+- **Operaciones atómicas sobre el store**: protegidas con `threading.Lock`
 
 ---
 

@@ -17,6 +17,7 @@ Chatbot multi-agente para consulta del archivo histórico de la revista **TeleRa
 - **Frontend Next.js 14** servido bajo `/teleradio` (`basePath`), con panel de contexto, debug y lightbox de imágenes
 - **Feedback valorado**: 👍 instantáneo; 👎 abre cajetín de comentario opcional
 - **Panel de administración**: estadísticas de uso (tiempos, tokens, fuentes) y gestión de usuarios
+- **Concurrencia multiusuario segura**: estado por query en `threading.local()` — distintos usuarios no se contaminan entre sí
 
 ---
 
@@ -182,7 +183,15 @@ El backend seleccionado se aplica a **todas** las llamadas internas: clasificaci
 El log (`feedback.log`) almacena por entrada: timestamp, usuario, sesión, rating, query, respuesta, comentario, tiempos de búsqueda/reranking/respuesta, número de fuentes, modelo LLM y tokens de prompt/respuesta.
 
 ---
+## Limpiar conversación
 
+El botón "🗑️ Limpiar" (o "Borrar todo" en la barra lateral) limpia el historial de chat y reinicia la memoria conversacional:
+
+1. El frontend emite un único mensaje WebSocket `{type: 'clear'}`
+2. El backend elimina el objeto `ConversationMemory` del store (no lo vacía en sitio) y crea uno nuevo
+3. Cualquier hilo de búsqueda todavía en ejecución para la query anterior escribe en el objeto huérfano — no contamina la nueva sesión
+
+---
 ## Estructura del proyecto
 
 ```
