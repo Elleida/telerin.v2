@@ -2395,6 +2395,7 @@ def custom_sql_search(sql_query: str, search_text: str = "") -> str:
     # Guardar la query SQL ejecutada en variable global
     clear_executed_sql_queries()
     add_executed_sql_query("custom_query", sql_query)
+    _custom_executed_queries = [{"table": "custom_query", "sql": sql_query}]
     
     # 🆕 Calcular tiempo total
     total_search_time = db_search_time + reranking_time
@@ -2411,6 +2412,7 @@ def custom_sql_search(sql_query: str, search_text: str = "") -> str:
         "sql_query": sql_query,
         "search_text": search_text,
         "search_classification": search_classification,
+        "executed_queries": _custom_executed_queries,
         "num_results": len(formatted_results),
         "results": formatted_results,
         "search_time": total_search_time,

@@ -518,6 +518,8 @@ Ejecuta la búsqueda apropiada ahora."""
                             tool_results_list = result_data.get('results', [])
                             if tool_results_list:
                                 search_results.extend(tool_results_list)
+                            if 'executed_queries' in result_data:
+                                sql_queries.extend(result_data['executed_queries'])
                             if 'search_time' in result_data:
                                 search_time += result_data['search_time']
                             if 'db_search_time' in result_data:
@@ -550,6 +552,7 @@ Ejecuta la búsqueda apropiada ahora."""
                 parsed = json.loads(raw) if isinstance(raw, str) else raw
                 if isinstance(parsed, dict) and parsed.get('success'):
                     search_results = parsed.get('results', [])
+                    sql_queries = parsed.get('executed_queries', [])
                     search_time = parsed.get('search_time', 0)
                     db_search_time = parsed.get('db_search_time', 0)
                     reranking_time = parsed.get('reranking_time', 0)
@@ -571,6 +574,7 @@ Ejecuta la búsqueda apropiada ahora."""
             parsed = json.loads(raw) if isinstance(raw, str) else raw
             if isinstance(parsed, dict) and parsed.get('success'):
                 search_results = parsed.get('results', [])
+                sql_queries = parsed.get('executed_queries', [])
                 search_time = parsed.get('search_time', 0)
                 db_search_time = parsed.get('db_search_time', 0)
                 reranking_time = parsed.get('reranking_time', 0)
@@ -585,7 +589,10 @@ Ejecuta la búsqueda apropiada ahora."""
     except Exception:
         pass
 
-    sql_queries = get_last_executed_sql_queries()
+    # Preferir sql_queries extraídas del JSON de retorno de la herramienta
+    # (evita depender de threading.local() que falla si ToolNode usa un hilo distinto)
+    if not sql_queries:
+        sql_queries = get_last_executed_sql_queries()
 
     print(f"✅ Búsqueda completada. Resultados: {len(search_results)}")
     print(f"🔍 DEBUG SEARCH_NODE: db_search_time={db_search_time:.2f}s, reranking_time={reranking_time:.2f}s, search_time={search_time:.2f}s")
