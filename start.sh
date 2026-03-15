@@ -1,9 +1,12 @@
 #!/bin/bash
 # start.sh — TeleRadio v2 (Backend FastAPI + Frontend Next.js)
 # Uso:
-#   ./start.sh           → lanza ambos
-#   ./start.sh backend   → solo backend
-#   ./start.sh frontend  → solo frontend
+#   ./start.sh                  → backend (1 worker, --reload) + frontend
+#   ./start.sh backend          → solo backend (1 worker, --reload)
+#   ./start.sh frontend         → solo frontend
+#   ./start.sh prod             → backend (4 workers, sin reload) + frontend
+#   ./start.sh prod backend     → solo backend (4 workers, sin reload)
+#   WORKERS=8 ./start.sh prod   → backend (8 workers) + frontend
 
 set -e
 
@@ -43,9 +46,30 @@ start_backend() {
     sleep 1
   fi
 
-  echo -e "${GREEN}[Backend] Arrancando FastAPI en :8000 ...${NC}"
   cd "$SCRIPT_DIR"
-  uvicorn backend.main:app --host 0.0.0.0 --port 8000 --reload &
+
+  if [ "$MODE" = "prod" ]; then
+    # ── Producción: múltiples workers, sin reload ──────────────────────────
+    # --workers N: uvicorn lanza N procesos hijos con un maestro que reparte
+    #   las conexiones. Incompatible con --reload.
+    # WORKERS: variable de entorno para sobreescribir (WORKERS=8 ./start.sh prod)
+    N_WORKERS="${WORKERS:-4}"
+    echo -e "${GREEN}[Backend] Arrancando FastAPI en :8000 — ${N_WORKERS} workers (prod)...${NC}"
+    uvicorn backend.main:app \
+      --host 0.0.0.0 \
+      --port 8000 \
+      --workers "$N_WORKERS" \
+      --log-level info &
+  else
+    # ── Desarrollo: 1 worker con --reload ─────────────────────────────────
+    # --reload es incompatible con --workers > 1.
+    echo -e "${GREEN}[Backend] Arrancando FastAPI en :8000 — 1 worker (dev, reload)...${NC}"
+    uvicorn backend.main:app \
+      --host 0.0.0.0 \
+      --port 8000 \
+      --reload &
+  fi
+
   BACKEND_PID=$!
   echo "   PID backend: $BACKEND_PID"
 }
@@ -76,9 +100,20 @@ start_frontend() {
 }
 
 # ── Lanzar según argumento ─────────────────────────────────────────────────
-TARGET="${1:-all}"
-# activamos venv si existe
+# Primer argumento: "prod" activa modo producción (multi-worker)
+# Segundo argumento (opcional): "backend" o "frontend"
+MODE="dev"
+TARGET="all"
 
+for arg in "$@"; do
+  case $arg in
+    prod)     MODE="prod" ;;
+    backend)  TARGET="backend" ;;
+    frontend) TARGET="frontend" ;;
+  esac
+done
+
+# activamos venv si existe
 if [ -f "$SCRIPT_DIR/venv/bin/activate" ]; then
   source "$SCRIPT_DIR/venv/bin/activate"
 fi
@@ -95,7 +130,7 @@ esac
 
 echo ""
 echo -e "${GREEN}✅ Sistema arrancado:${NC}"
-echo "   Backend  → http://localhost:8000"
+echo "   Backend  → http://localhost:8000  (modo: $MODE)"
 echo "   Frontend → http://localhost:8502"
 echo "   API docs → http://localhost:8000/docs"
 echo ""

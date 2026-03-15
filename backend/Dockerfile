@@ -5,4 +5,4 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
 # El agente v1.3 se monta como volumen en /agent
 ENV PYTHONPATH=/agent:/app
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD uvicorn main:app --host 0.0.0.0 --port 8000 --workers ${WORKERS:-4}

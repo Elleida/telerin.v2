@@ -16,6 +16,7 @@ services:
     environment:
       - AGENT_DIR=/agent
       - FEEDBACK_LOG_PATH=/app/logs/feedback.log
+      - WORKERS=4
     depends_on: []
 
   frontend:

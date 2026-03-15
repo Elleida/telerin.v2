@@ -275,7 +275,59 @@ class ConversationMemory:
         }
         self.search_history = []
         self.last_results = []
-    
+
+    # ── Serialización para persistencia ───────────────────────────────────
+
+    def to_dict(self) -> dict:
+        """Serializa la ConversationMemory a un dict JSON-serializable.
+
+        Usado por session_store.save_session() para persistir en CrateDB.
+        Los search_results de cada turno se truncan (max 3) para controlar
+        el tamaño del blob guardado.
+        """
+        def _serialize_turn(turn: dict) -> dict:
+            t = dict(turn)
+            # Limitar resultados de búsqueda por turno
+            if "search_results" in t:
+                t["search_results"] = t["search_results"][:3]
+            # Convertir posibles sets en entities_found
+            if "entities_found" in t and isinstance(t["entities_found"], dict):
+                t["entities_found"] = {
+                    k: list(v) if isinstance(v, set) else v
+                    for k, v in t["entities_found"].items()
+                }
+            return t
+
+        return {
+            "messages":        [_serialize_turn(m) for m in self.messages],
+            "context_summary": self.context_summary,
+            "entities":        {k: list(v) for k, v in self.entities.items()},
+            "search_history":  self.search_history[-20:],
+            "last_results":    self.last_results[:5],
+            "max_history":     self.max_history,
+            "context_window":  self.context_window,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "ConversationMemory":
+        """Deserializa una ConversationMemory desde un dict (inverso de to_dict).
+
+        Usado por session_store._load_from_cratedb() al restaurar sesiones.
+        """
+        obj = cls(
+            max_history=data.get("max_history", 100),
+            context_window=data.get("context_window", 5),
+        )
+        obj.messages = [dict(m) for m in data.get("messages", [])]
+        obj.context_summary = data.get("context_summary", {})
+        raw_entities = data.get("entities", {})
+        for key in obj.entities:
+            if key in raw_entities:
+                obj.entities[key] = set(raw_entities[key])
+        obj.search_history = data.get("search_history", [])
+        obj.last_results = data.get("last_results", [])
+        return obj
+
     def get_memory_summary(self) -> str:
         """
         Retorna un resumen legible del contexto para debugging

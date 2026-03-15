@@ -2475,110 +2475,91 @@ def _add_png_links_to_response(response_text: str, sources: List[Dict]) -> str:
         # elif doc_num:
         #     print(f"      ⚠️ Sin PNG URL para documento {doc_num}")
     
-    # Buscar y reemplazar menciones de documentos
-    # Patrón 1: "Documento/s X, Y, Z..." (singular o plural con lista de números)
-    # Captura "Documento" o "Documentos" seguido de números separados por comas, "y", o espacios
-    pattern_plural = r'\b([Dd]ocumentos?)\s+([\d,\sy\-]+)(?!\s*\[)'
-    
-    def replacer_plural(match):
-        doc_word = match.group(1)  # "documentos" o "Documentos"
-        numbers_text = match.group(2)  # "3, 5, 7, 8, 9, 10, 12..."
-        
+    # ── Patrón unificado de sustitución de referencias a documentos ──────────
+    #
+    # Problemas del enfoque anterior (dos pasadas plural + singular):
+    #   1. [\d,\sy\-]+ incluye \s (saltos de línea), por lo que "54" partido en
+    #      dos líneas se interpretaba como dos documentos separados (5 y 4).
+    #   2. El patrón plural consumía la coma/espacio que seguía al número pero
+    #      no los reproducía, dejando texto pegado.
+    #   3. El filename "Ejemplar: XXX_analysis.json" se limpiaba en una pasada
+    #      separada, dejando residuos ("TELE ", "Ejemplar:") difíciles de limpiar.
+    #
+    # Solución: un único patrón que:
+    #   a) Captura "Documento(s) N [, M, ...]" SIN cruzar saltos de línea
+    #      (usa [ ,y]+ en lugar de \s que incluía \n).
+    #   b) Consume opcionalmente ", Ejemplar: <filename>_analysis.json"
+    #      en el mismo match, eliminándolo en una sola operación.
+    #   c) Un único replacer construye el texto final limpio.
+
+    # Filename: "TELE_..._analysis.json" (guión bajo) o "TELE radio_..._analysis.json" (espacio)
+    _FNAME_PAT = r'(?:TELE\s+)?[\w][\w\-\.]*_analysis\.json'
+
+    # Lista de números de documento: uno o más enteros separados por coma/espacio/y
+    # IMPORTANTE: no se usa \s para evitar cruzar saltos de línea.
+    _NUMS_PAT = r'\d+(?:[ ,y]+\d+)*'
+
+    # Patrón completo:
+    #   grupo 1 → "Documento" / "Documentos"
+    #   grupo 2 → lista de números  (p.ej. "54" o "5, 4, 12")
+    #   grupo 3 → filename (opcional, consumido para eliminarlo)
+    #   lookahead negativo → no re-procesar referencias ya enlazadas
+    pattern_unified = (
+        rf'\b([Dd]ocumentos?)\s+({_NUMS_PAT})'
+        rf'(?:\s*,?\s*Ejemplar\s*:\s*(?:{_FNAME_PAT}))?'
+        rf'(?!\s*\[)'
+    )
+
+    def replacer_unified(match):
+        doc_word    = match.group(1)   # "Documento" / "Documentos"
+        numbers_text = match.group(2)  # "54" / "5, 4"
+
         try:
-            # Extraer todos los números de la lista
             numbers = re.findall(r'\d+', numbers_text)
-            
-            # Construir el resultado con enlaces (mantener palabra documentos, quitar números)
             result_parts = [doc_word]
             for i, num_str in enumerate(numbers):
                 doc_num = int(num_str)
                 if doc_num in doc_to_info:
                     info = doc_to_info[doc_num]
-                    # Construir información adicional (revista#XXX y fecha)
                     extra_info = []
                     if info.get("magazine_id"):
                         extra_info.append(info["magazine_id"])
                     if info.get("date"):
                         extra_info.append(info["date"])
-                    
                     extra_str = f" {', '.join(extra_info)}" if extra_info else ""
-                    
-                    # Agregar número + enlace
                     if i > 0:
                         result_parts.append(",")
                     result_parts.append(f" {num_str} [🗄️]({info['url']}){extra_str}")
                 else:
-                    # Número sin enlace (mantener referencia básica)
                     if i > 0:
                         result_parts.append(",")
                     result_parts.append(f" {num_str}")
-            
             return "".join(result_parts)
         except Exception as e:
-            # Si hay error en el procesamiento, devolver el texto original
-            print(f"⚠️ Error procesando lista de documentos: {e}")
+            print(f"⚠️ Error procesando referencias de documentos: {e}")
             return match.group(0)
-    
-    try:
-        # Primero procesar listas plurales
-        response_with_links = re.sub(pattern_plural, replacer_plural, response_text)
-    except Exception as e:
-        print(f"⚠️ Error en patrón plural: {e}")
-        response_with_links = response_text
-    
-    # Patrón 2: "documento X" singular (case insensitive)
-    # Usamos negative lookahead para no procesar si ya hay un enlace después
-    pattern_singular = r'\b([Dd]ocumento)\s+(\d+)(?!\s*\[)'
-    
-    def replacer_singular(match):
-        doc_word = match.group(1)  # "documento" o "Documento"
-        doc_num = int(match.group(2))
-        
-        if doc_num in doc_to_info:
-            info = doc_to_info[doc_num]
-            # Construir información adicional (revista#XXX y fecha)
-            extra_info = []
-            if info.get("magazine_id"):
-                extra_info.append(info["magazine_id"])
-            if info.get("date"):
-                extra_info.append(info["date"])
-            
-            extra_str = f" {', '.join(extra_info)}" if extra_info else ""
-            
-            # Reemplazar "documento X" con "documento N [enlace]"
-            return f"{doc_word} {doc_num} [🗄️]({info['url']}){extra_str}"
-        else:
-            return match.group(0)  # Dejar sin cambios si no hay URL
-    
-    try:
-        response_with_links = re.sub(pattern_singular, replacer_singular, response_with_links)
-    except Exception as e:
-        print(f"⚠️ Error en patrón singular: {e}")
-    
-    # Eliminar cualquier referencia a ficheros *_analysis.json que el LLM haya podido incluir
-    cleaned = re.sub(r'\b[\w\-\.]+_analysis\.json\b', '', response_with_links)
-    # Limpiar dobles espacios o paréntesis vacíos que queden tras la limpieza
-    cleaned = re.sub(r'\(\s*,\s*', '(', cleaned)
-    cleaned = re.sub(r',\s*\)', ')', cleaned)
-    cleaned = re.sub(r'\(\s*\)', '', cleaned)
-    cleaned = re.sub(r'  +', ' ', cleaned)
-    if cleaned != response_with_links:
-        print(f"🧹 Referencias a _analysis.json eliminadas de la respuesta")
-    response_with_links = cleaned
 
-    # Eliminar residuos de "Ejemplar:," / "Ejemplar," (queda cuando se borra el _analysis.json del magazine_id)
-    # Cubre: "Ejemplar,", "Ejemplar:,", "Ejemplar: ,", "Ejemplar ," con o sin dos puntos
-    cleaned = re.sub(r'\bEjemplar\s*:?\s*,', '', response_with_links, flags=re.IGNORECASE)
-    # Por si quedó "Ejemplar:" o "Ejemplar" sin coma (valor completamente eliminado)
-    cleaned = re.sub(r'\bEjemplar\s*:?\s*(?=[,\)\s]|$)', '', cleaned, flags=re.IGNORECASE)
-    # Limpiar comas dobles o comas al inicio de paréntesis que puedan quedar
+    try:
+        response_with_links = re.sub(pattern_unified, replacer_unified, response_text)
+    except Exception as e:
+        print(f"⚠️ Error en patrón unificado: {e}")
+        response_with_links = response_text
+
+    # ── Limpieza de seguridad (filenames residuales fuera del contexto Documento) ──
+    # Caso "TELE radio_..._analysis.json" (espacio interno)
+    cleaned = re.sub(r',?\s*\bTELE\s+[\w\-\.]+_analysis\.json\b', '', response_with_links)
+    # Caso "TELE_..._analysis.json" u otros filenames contiguos
+    cleaned = re.sub(r',?\s*\b[\w\-\.]+_analysis\.json\b', '', cleaned)
+    # Residuos de "Ejemplar:" que el LLM haya podido incluir fuera del patrón anterior
+    cleaned = re.sub(r',?\s*\bEjemplar\s*:\s*', '', cleaned, flags=re.IGNORECASE)
+    # Limpiar comas dobles, paréntesis vacíos y espacios múltiples
     cleaned = re.sub(r'\(\s*,\s*', '(', cleaned)
     cleaned = re.sub(r',\s*,', ',', cleaned)
     cleaned = re.sub(r',\s*\)', ')', cleaned)
     cleaned = re.sub(r'\(\s*\)', '', cleaned)
     cleaned = re.sub(r'  +', ' ', cleaned)
     if cleaned != response_with_links:
-        print(f"🧹 Residuos de 'Ejemplar:,' eliminados de la respuesta")
+        print(f"🧹 Referencias _analysis.json / Ejemplar: residuales eliminadas")
     response_with_links = cleaned
     
 

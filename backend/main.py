@@ -12,6 +12,9 @@ from fastapi.staticfiles import StaticFiles
 
 from backend.config import CORS_ORIGINS
 from backend.services.auth import ensure_users_table
+from backend.services.session_store import ensure_sessions_table, start_cleanup_scheduler
+from backend.services.query_logger import ensure_query_log_table
+from backend.routers.feedback import ensure_feedback_table
 from backend.routers import auth, chat, feedback, image, session, stats, models
 
 app = FastAPI(
@@ -51,6 +54,10 @@ else:
 @app.on_event("startup")
 async def on_startup():
     ensure_users_table()
+    ensure_sessions_table()
+    ensure_query_log_table()
+    ensure_feedback_table()
+    start_cleanup_scheduler()
     print("✅ TeleRadio Backend v2.0 arrancado")
 
 

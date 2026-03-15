@@ -68,6 +68,11 @@ FEEDBACK_LOG_PATH=/ruta/a/logs/feedback.log
 DISABLE_STREAMING=0
 MEMORY_CONTEXT_WINDOW=5
 MEMORY_MAX_HISTORY=100
+
+# ── Limpieza de sesiones inactivas ─────────────────────────────────────────
+SESSION_MAX_IDLE_HOURS=24     # horas sin acceso para liberar RAM
+SESSION_MAX_IDLE_DAYS=30      # días de inactividad para borrar de CrateDB
+SESSION_CLEANUP_INTERVAL=3600 # segundos entre ciclos de limpieza
 ```
 
 > **`PNG_BASE_URL` debe ser una ruta relativa** como `/teleradio/images`, no una URL absoluta con puerto.
@@ -117,7 +122,9 @@ cd ..
 ### 3.3 Arrancar
 
 ```bash
-./start.sh
+./start.sh           # desarrollo: 1 worker, hot-reload
+./start.sh prod      # producción: 4 workers, sin reload
+WORKERS=8 ./start.sh prod  # producción con 8 workers
 ```
 
 El script `start.sh` realiza automáticamente:
@@ -126,12 +133,15 @@ El script `start.sh` realiza automáticamente:
 - Lanza uvicorn (backend FastAPI) en `:8000`
 - Lanza Next.js (frontend) en `:8502`
 
-También se puede arrancar cada servicio por separado:
+| Comando | Workers | Hot-reload | Descripción |
+|---|---|---|---|
+| `./start.sh` | 1 | ✅ | Desarrollo |
+| `./start.sh backend` | 1 | ✅ | Solo backend dev |
+| `./start.sh prod` | 4 | ❌ | Producción |
+| `./start.sh prod backend` | 4 | ❌ | Solo backend prod |
+| `WORKERS=8 ./start.sh prod` | 8 | ❌ | Prod personalizado |
 
-```bash
-./start.sh backend    # solo backend
-./start.sh frontend   # solo frontend
-```
+> **Nota**: `--reload` es incompatible con `--workers > 1`. El modo `prod` siempre desactiva el hot-reload.
 
 ### 3.4 Verificar
 
@@ -241,7 +251,27 @@ pngprocessed/
 
 ---
 
-## 8. Solución de problemas frecuentes
+## 8. Escalado multi-worker
+
+Para un despliegue en producción con carga real, lanzar el backend con varios workers uvicorn:
+
+```bash
+./start.sh prod           # 4 workers (defecto)
+WORKERS=8 ./start.sh prod # 8 workers
+```
+
+Cada worker es un proceso Python independiente con su propia cache L1 de sesiones en RAM. El estado compartido se mantiene en **CrateDB** (capa L2):
+
+- **Sesiones**: cualquier worker puede atender cualquier usuario; si la sesión no está en su RAM local, la carga de `telerin_sessions`.
+- **Logs**: los writes a `telerin_query_log` son fire-and-forget en un hilo daemon (no bloquean la respuesta al usuario).
+- **Feedback**: `telerin_feedback` es el destino primario; `feedback.log` actúa de backup local.
+- **Limpieza**: el scheduler corre en cada worker de forma independiente; dado que opera contra CrateDB, los deletes son idempotentes.
+
+> **Nota nginx**: si se usa nginx como balanceador, no se requieren sticky sessions porque el estado está en CrateDB. Si no obstante se quiere sticky sessions por rendimiento (evitar cache misses en L1), usar `ip_hash` o cookies de upstream.
+
+---
+
+## 9. Solución de problemas frecuentes
 
 ### Las imágenes no cargan (404)
 

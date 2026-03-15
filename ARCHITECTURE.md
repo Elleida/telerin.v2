@@ -65,7 +65,17 @@ rewrites: [
 
 ### 1. FastAPI (`backend/main.py`)
 
-Punto de entrada. Registra los routers, monta el directorio de imágenes estáticas en `/images` (desde `PNG_BASE_DIR`) y lanza la inicialización de la tabla de usuarios al arranque.
+Punto de entrada. Registra los routers, monta el directorio de imágenes estáticas en `/images` (desde `PNG_BASE_DIR`) y ejecuta la siguiente secuencia en el evento `startup`:
+
+```python
+@app.on_event("startup")
+async def on_startup():
+    ensure_users_table()          # tabla telerin_users
+    ensure_sessions_table()       # tabla telerin_sessions
+    ensure_query_log_table()      # tabla telerin_query_log
+    ensure_feedback_table()       # tabla telerin_feedback
+    start_cleanup_scheduler()     # scheduler de limpieza de sesiones inactivas
+```
 
 **Routers:**
 
@@ -251,13 +261,42 @@ ConversationMemory
   └── entities: {years, channels, programs, topics, ...}
 ```
 
-**Gestión de sesiones (`backend/services/session_store.py`):**
+Soporta serialización completa con `to_dict()` / `from_dict()` para persistencia en CrateDB.
 
-Cada usuario autenticado tiene su propio objeto `ConversationMemory`, indexado por `user_id` (UUID) y protegido por un `threading.Lock`:
+**Gestión de sesiones (`backend/services/session_store.py`) — Caché L1 + L2:**
 
-```python
-_sessions: Dict[str, ConversationMemory] = {}
-_lock = Lock()
+Cada usuario autenticado tiene su propio objeto `ConversationMemory`, indexado por `user_id` (UUID):
+
+```
+get_session(user_id)
+  ├─ L1 (RAM, por proceso) ─► hit → devuelve inmediato, actualiza last_access
+  └─ L1 miss
+       ├─ L2 (CrateDB telerin_sessions) ─► restaura ConversationMemory.from_dict()
+       └─ no existe → nueva instancia vacía
+
+save_session(user_id, memory)           ← fire-and-forget tras cada turno
+  └─ upsert en telerin_sessions (INSERT → falla → UPDATE)
+
+clear_session(user_id)                  ← botón "Limpiar" del usuario
+  └─ pop de L1 + DELETE de CrateDB
+```
+
+**Tablas CrateDB del sistema:**
+
+| Tabla | Contenido |
+|---|---|
+| `telerin_users` | Usuarios y credenciales |
+| `telerin_sessions` | Memoria conversacional serializada (JSON) |
+| `telerin_feedback` | Ratings 👍/👎 con timings y tokens |
+| `telerin_query_log` | Queries de usuario y respuestas del agente |
+
+**Limpieza automática de sesiones (scheduler daemon):**
+
+```
+start_cleanup_scheduler()   ← startup de main.py
+  └─ hilo daemon "session-cleanup", cada SESSION_CLEANUP_INTERVAL segundos:
+       ├─ evict_stale_l1(SESSION_MAX_IDLE_HOURS)    → libera RAM
+       └─ evict_stale_cratedb(SESSION_MAX_IDLE_DAYS) → compacta CrateDB
 ```
 
 `clear_session()` elimina la entrada del diccionario (`pop`) en lugar de vaciar el objeto en sitio. Esto evita la siguiente race condition:
@@ -267,8 +306,6 @@ _lock = Lock()
 Hilo A (query anterior): todavía ejecutando → add_turn() al objeto antiguo ← huérfano, descartado
 Hilo B (nueva query)   : get_session() → crea ConversationMemory nuevo y limpio ✅
 ```
-
-Si `clear_session` llamara a `.clear()` sobre el mismo objeto, el hilo A podría reinyectar turnos viejos después del borrado.
 
 ---
 
@@ -343,13 +380,18 @@ Si VIVOClient no está disponible, los resultados se ordenan por `relevance_scor
 
 ### 9. Feedback y log
 
-El router `feedback.py` guarda una línea JSON por valoración en `feedback.log`:
+El router `feedback.py` persiste cada valoración en dos destinos:
+1. **CrateDB** `telerin_feedback` (primario, multi-instancia).
+2. **`feedback.log`** (backup JSON Lines, legado).
+
+El router `query_logger.py` persiste cada par query/respuesta en:
+1. **CrateDB** `telerin_query_log` (fire-and-forget en hilo daemon).
+2. **`queries_responses.log`** (backup rotativo con compresión gzip).
 
 ```json
 {
   "ts": "2026-02-26T12:00:00+00:00",
   "user": "alice",
-  "session": "abc123",
   "rating": "down",
   "query": "¿Quién presentaba Caras Nuevas?",
   "response": "...",
@@ -362,13 +404,11 @@ El router `feedback.py` guarda una línea JSON por valoración en `feedback.log`
 }
 ```
 
-El campo `comment` solo aparece en valoraciones negativas (👎) donde el usuario ha escrito algo en el cajetín.
-
 ---
 
 ### 10. Estadísticas de uso (`/api/stats`)
 
-Solo accesible para administradores. Lee `feedback.log` y calcula:
+Solo accesible para administradores. Lee de **CrateDB** `telerin_feedback` (fallback a `feedback.log`) y calcula:
 
 | Métrica | Descripción |
 |---|---|
@@ -462,7 +502,7 @@ Browser: GET /teleradio/images/... → Next.js rewrite → GET http://localhost:
 
 ---
 
-## Concurrencia multiusuario
+## Concurrencia y escalado multiusuario
 
 ```
 Usuario A (uuid-A)                     Usuario B (uuid-B)
@@ -470,7 +510,10 @@ Usuario A (uuid-A)                     Usuario B (uuid-B)
   WebSocket coroutine A              WebSocket coroutine B
        │                                       │
   session_store["uuid-A"]           session_store["uuid-B"]
-  ConversationMemory_A              ConversationMemory_B
+  ConversationMemory_A  ←──────────────────────────────────┐
+  (L1 RAM proceso)                                         │
+  ← save → CrateDB telerin_sessions                       │
+  (L2 compartida entre workers)  ──────────────────────────┘
           │                                    │
   Hilo _bg(mem=Memory_A)            Hilo _bg(mem=Memory_B)
   threading.local()_A               threading.local()_B
@@ -480,9 +523,12 @@ Usuario A (uuid-A)                     Usuario B (uuid-B)
 
 Garantías:
 - **Memoria conversacional**: objeto `ConversationMemory` distinto por `user_id`
+- **Persistencia cross-restart**: sesiones serializadas en CrateDB — sobreviven reinicios del proceso
+- **Multi-worker**: cualquier worker carga la sesión de CrateDB si no está en su L1 local
 - **Parámetros de query**: `threading.local()` en `tools.py` — cada hilo tiene su copia privada
 - **Captura de memoria en hilo**: `def _bg(mem=memory)` — argumento por defecto fija el objeto en el momento de creación, independientemente de los `clear` posteriores
 - **Operaciones atómicas sobre el store**: protegidas con `threading.Lock`
+- **Limpieza automática**: scheduler daemon expulsa sesiones inactivas de RAM (L1) y CrateDB (L2)
 
 ---
 
@@ -498,3 +544,6 @@ Garantías:
 | `MEMORY_MAX_HISTORY` | `100` | Máximo de turnos almacenados por sesión |
 | `MEMORY_AUTO_ENHANCE` | `true` | Activar/desactivar mejora de query con contexto |
 | `DISABLE_STREAMING` | `0` | Forzar respuesta no-streaming |
+| `SESSION_MAX_IDLE_HOURS` | `24` | Horas sin acceso para liberar sesión de RAM (L1) |
+| `SESSION_MAX_IDLE_DAYS` | `30` | Días de inactividad para borrar sesión de CrateDB (L2) |
+| `SESSION_CLEANUP_INTERVAL` | `3600` | Segundos entre ciclos del scheduler de limpieza |

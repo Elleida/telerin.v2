@@ -1,6 +1,9 @@
 """
 Router de estadísticas: GET /api/stats  y  GET /api/stats/queries-log
-Lee el feedback.log / queries_responses.log y devuelve métricas de uso.
+
+Fuente de datos (en orden de prioridad):
+  1. CrateDB (tablas telerin_feedback / telerin_query_log) — multi-instancia.
+  2. Ficheros locales (feedback.log / queries_responses.log) — legado / fallback.
 Solo accesible para administradores.
 """
 from __future__ import annotations
@@ -12,11 +15,16 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Optional
 
+import requests
+from requests.auth import HTTPBasicAuth
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, field_validator
 from pydantic import BaseModel
 
-from backend.config import LOG_FILE as QUERY_LOG_FILE
+from backend.config import (
+    LOG_FILE as QUERY_LOG_FILE,
+    CRATEDB_URL, CRATEDB_USERNAME, CRATEDB_PASSWORD,
+)
 from backend.dependencies import get_current_admin
 
 router = APIRouter(prefix="/api/stats", tags=["stats"])
@@ -24,8 +32,26 @@ router = APIRouter(prefix="/api/stats", tags=["stats"])
 _LOG_PATH = Path(os.getenv("FEEDBACK_LOG_PATH", "/app/logs/feedback.log"))
 _FALLBACK_LOG_PATH = Path("/tmp/feedback.log")
 
+# ── CrateDB helper ─────────────────────────────────────────────────────────
 
-def _read_entries() -> list[dict]:
+def _cratedb(stmt: str, args: list | None = None) -> dict:
+    payload: dict = {"stmt": stmt}
+    if args:
+        payload["args"] = args
+    resp = requests.post(
+        CRATEDB_URL,
+        json=payload,
+        auth=HTTPBasicAuth(CRATEDB_USERNAME, CRATEDB_PASSWORD) if CRATEDB_PASSWORD else None,
+        timeout=15,
+    )
+    resp.raise_for_status()
+    return resp.json()
+
+
+# ── Feedback readers ────────────────────────────────────────────────────────
+
+def _read_entries_from_file() -> list[dict]:
+    """Lee las entradas de feedback desde el fichero local (legado)."""
     for path in [_LOG_PATH, _FALLBACK_LOG_PATH]:
         try:
             if path.exists():
@@ -42,6 +68,48 @@ def _read_entries() -> list[dict]:
         except Exception:
             pass
     return []
+
+
+def _read_entries() -> list[dict]:
+    """Lee entradas de feedback. Intenta CrateDB primero; usa fichero como fallback."""
+    try:
+        result = _cratedb("""
+            SELECT ts, username, session_id, rating, query, response, comment,
+                   num_sources, llm_model, prompt_tokens, response_tokens,
+                   db_search_s, reranking_s, response_s, total_s
+            FROM telerin_feedback
+            ORDER BY ts ASC
+            LIMIT 5000
+        """)
+        rows = result.get("rows", [])
+        cols = result.get("cols", [])
+        if rows:
+            entries = []
+            for row in rows:
+                d = dict(zip(cols, row))
+                entries.append({
+                    "ts":              d.get("ts", ""),
+                    "user":            d.get("username", ""),
+                    "session":         d.get("session_id", ""),
+                    "rating":          d.get("rating", ""),
+                    "query":           d.get("query", ""),
+                    "response":        d.get("response", ""),
+                    "comment":         d.get("comment", ""),
+                    "num_sources":     d.get("num_sources", 0),
+                    "llm_model":       d.get("llm_model", ""),
+                    "prompt_tokens":   d.get("prompt_tokens", 0),
+                    "response_tokens": d.get("response_tokens", 0),
+                    "timings": {
+                        "db_search_s": float(d.get("db_search_s") or 0.0),
+                        "reranking_s": float(d.get("reranking_s") or 0.0),
+                        "response_s":  float(d.get("response_s") or 0.0),
+                        "total_s":     float(d.get("total_s") or 0.0),
+                    },
+                })
+            return entries
+    except Exception as exc:
+        print(f"⚠️ [stats] CrateDB no disponible para feedback, usando fichero: {exc}")
+    return _read_entries_from_file()
 
 
 class DayStat(BaseModel):
@@ -200,8 +268,8 @@ def _strip_knn_vector(sql: str) -> str:
     )
 
 
-def _read_query_log_entries() -> list[dict]:
-    """Read assistant entries from queries_responses.log (NDJSON)."""
+def _read_query_log_entries_from_file() -> list[dict]:
+    """Lee entradas de log de queries desde el fichero local (legado)."""
     for path in _QUERY_LOG_PATHS:
         try:
             if path.exists():
@@ -221,6 +289,48 @@ def _read_query_log_entries() -> list[dict]:
         except Exception:
             pass
     return []
+
+
+def _read_query_log_entries() -> list[dict]:
+    """Lee entradas de log de queries. Intenta CrateDB primero; usa fichero como fallback."""
+    try:
+        result = _cratedb("""
+            SELECT ts, username, query, response, search_time, response_time,
+                   query_type, search_classification, sql_queries
+            FROM telerin_query_log
+            WHERE type_ = 'assistant'
+            ORDER BY ts ASC
+            LIMIT 5000
+        """)
+        rows = result.get("rows", [])
+        cols = result.get("cols", [])
+        if rows:
+            entries = []
+            for row in rows:
+                d = dict(zip(cols, row))
+                sql_qs = []
+                try:
+                    raw = d.get("sql_queries")
+                    if raw:
+                        sql_qs = json.loads(raw)
+                except Exception:
+                    pass
+                entries.append({
+                    "timestamp":            d.get("ts", ""),
+                    "username":             d.get("username", ""),
+                    "query":                d.get("query", ""),
+                    "response":             d.get("response", ""),
+                    "search_time":          float(d.get("search_time") or 0.0),
+                    "response_time":        float(d.get("response_time") or 0.0),
+                    "query_type":           d.get("query_type", ""),
+                    "search_classification": d.get("search_classification", ""),
+                    "sql_queries":          sql_qs,
+                    "type":                 "assistant",
+                })
+            return entries
+    except Exception as exc:
+        print(f"⚠️ [stats] CrateDB no disponible para query_log, usando fichero: {exc}")
+    return _read_query_log_entries_from_file()
 
 
 class SqlEntry(BaseModel):

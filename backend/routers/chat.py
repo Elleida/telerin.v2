@@ -42,7 +42,7 @@ from backend.compat.graph import run_graph
 from backend.compat.tools import set_sql_results_limit, set_llm_score_threshold, set_chat_history
 
 from backend.services.auth import decode_token, get_user_by_id
-from backend.services.session_store import clear_session, get_session
+from backend.services.session_store import clear_session, get_session, save_session
 from backend.services.query_logger import log_user_query, log_assistant_response
 
 router = APIRouter(tags=["chat"])
@@ -262,6 +262,10 @@ async def ws_chat(websocket: WebSocket):
                     "sql_queries":         result.get("sql_queries"),
                 },
             )
+
+            # Persistir sesión en CrateDB (fire-and-forget en el pool de threads
+            # para no bloquear el event loop de asyncio)
+            loop.run_in_executor(None, lambda mem=memory: save_session(session_id, mem))
 
     except WebSocketDisconnect:
         pass

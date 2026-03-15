@@ -18,6 +18,9 @@ Chatbot multi-agente para consulta del archivo histórico de la revista **TeleRa
 - **Feedback valorado**: 👍 instantáneo; 👎 abre cajetín de comentario opcional
 - **Panel de administración**: estadísticas de uso (tiempos, tokens, fuentes) y gestión de usuarios
 - **Concurrencia multiusuario segura**: estado por query en `threading.local()` — distintos usuarios no se contaminan entre sí
+- **Sesiones persistentes**: la memoria conversacional sobrevive reinicios del servidor (almacenada en CrateDB)
+- **Multi-worker**: soporte para múltiples workers uvicorn compartiendo estado vía CrateDB
+- **Limpieza automática de sesiones**: expulsión de RAM tras inactividad configurable; borrado de CrateDB tras N días
 
 ---
 
@@ -65,10 +68,20 @@ cp backend/.env.example backend/.env
 cd frontend && npm install && cd ..
 
 # 5. Arrancar todo
-./start.sh
+./start.sh           # desarrollo (1 worker, --reload)
+./start.sh prod      # producción (4 workers)
+WORKERS=8 ./start.sh prod  # producción con 8 workers
 ```
 
 El script `start.sh` libera los puertos 8000 y 8502, activa el venv y lanza backend y frontend en paralelo.
+
+| Comando | Workers | Hot-reload | Descripción |
+|---|---|---|---|
+| `./start.sh` | 1 | ✅ | Desarrollo |
+| `./start.sh backend` | 1 | ✅ | Solo backend dev |
+| `./start.sh prod` | 4 | ❌ | Producción |
+| `./start.sh prod backend` | 4 | ❌ | Solo backend prod |
+| `WORKERS=8 ./start.sh prod` | 8 | ❌ | Prod personalizado |
 
 ---
 
@@ -104,10 +117,14 @@ docker compose up --build
 | `PNG_BASE_DIR` | Directorio local de imágenes PNG | `/path/to/pngprocessed` |
 | `PNG_BASE_URL` | Prefijo de URL para imágenes | `/teleradio/images` |
 | `JWT_SECRET_KEY` | Clave firma JWT | *(cadena aleatoria ≥32 chars)* |
+| `JWT_EXPIRE_HOURS` | Duración del token JWT (horas) | `8` |
 | `CORS_ORIGINS` | Orígenes permitidos (CSV) | `http://localhost:8502,https://dihana.unizar.es` |
-| `FEEDBACK_LOG_PATH` | Ruta del log de feedback | `/app/logs/feedback.log` |
+| `FEEDBACK_LOG_PATH` | Ruta del log de feedback (backup) | `/app/logs/feedback.log` |
 | `MEMORY_CONTEXT_WINDOW` | Turnos de contexto (defecto: 5) | `5` |
 | `MEMORY_MAX_HISTORY` | Máximo turnos en memoria (defecto: 100) | `100` |
+| `SESSION_MAX_IDLE_HOURS` | Horas sin acceso para liberar RAM (defecto: 24) | `24` |
+| `SESSION_MAX_IDLE_DAYS` | Días de inactividad para borrar de CrateDB (defecto: 30) | `30` |
+| `SESSION_CLEANUP_INTERVAL` | Segundos entre ciclos de limpieza (defecto: 3600) | `3600` |
 | `DISABLE_STREAMING` | Desactivar streaming (0/1) | `0` |
 
 > **Nota sobre `PNG_BASE_URL`**: debe ser una ruta relativa (`/teleradio/images`) para que las imágenes funcionen tanto en acceso directo como a través de nginx, sin mixed-content ni necesidad de exponer el puerto 8000 externamente.
@@ -177,10 +194,14 @@ El backend seleccionado se aplica a **todas** las llamadas internas: clasificaci
 
 - 👍 — envía feedback positivo inmediatamente  
 - 👎 — abre un cajetín de texto opcional ("¿Qué ha fallado?")  
-  - **Enviar**: guarda el comentario en `feedback.log`  
+  - **Enviar**: guarda el comentario  
   - **Saltar**: guarda el feedback negativo sin comentario  
 
-El log (`feedback.log`) almacena por entrada: timestamp, usuario, sesión, rating, query, respuesta, comentario, tiempos de búsqueda/reranking/respuesta, número de fuentes, modelo LLM y tokens de prompt/respuesta.
+El feedback se almacena en dos destinos (prioridad CrateDB, fallback fichero):
+- **CrateDB** `telerin_feedback` — compartido entre todos los workers/instancias.
+- **`feedback.log`** — backup local por si CrateDB no está disponible.
+
+Por entrada se guardan: timestamp, usuario, sesión, rating, query, respuesta, comentario, tiempos de búsqueda/reranking/respuesta, número de fuentes, modelo LLM y tokens.
 
 ---
 ## Limpiar conversación

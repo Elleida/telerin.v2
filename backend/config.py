@@ -108,7 +108,10 @@ CONVERSATION_MEMORY_CONFIG = {
 JWT_SECRET_KEY   = os.getenv("JWT_SECRET_KEY", "CHANGE_ME_IN_PRODUCTION_USE_RANDOM_32_CHARS")
 JWT_ALGORITHM    = "HS256"
 JWT_EXPIRE_HOURS = int(os.getenv("JWT_EXPIRE_HOURS", "8"))
-
+# ── Session cleanup ────────────────────────────────────────────────────────
+SESSION_MAX_IDLE_HOURS = int(os.getenv("SESSION_MAX_IDLE_HOURS", "24"))   # evict de L1 RAM
+SESSION_MAX_IDLE_DAYS  = int(os.getenv("SESSION_MAX_IDLE_DAYS", "30"))    # DELETE de CrateDB
+SESSION_CLEANUP_INTERVAL_SECONDS = int(os.getenv("SESSION_CLEANUP_INTERVAL", "3600"))  # cada hora
 # ── CORS (orígenes permitidos) ─────────────────────────────────────────────
 CORS_ORIGINS = os.getenv("CORS_ORIGINS", "http://localhost:3000").split(",")
 
